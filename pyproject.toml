@@ -1,7 +1,7 @@
 [project]
 name = "yugioh-db"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI app for searching Yu-Gi-Oh cards by set code and tracking a local collection"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []
