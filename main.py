@@ -53,10 +53,13 @@ def cmd_list(_: argparse.Namespace) -> int:
 
     print("Saved cards:")
     for item in cards:
+        stats = f"ATK {item.get('atk', '-')}/DEF {item.get('def', '-')}"
         print(
             f"- {item.get('name', 'Unknown Card')} "
             f"(id: {item.get('card_id', 'unknown')}, "
-            f"set: {item.get('set_code', 'unknown')}) x{item.get('quantity', 0)}"
+            f"set: {item.get('set_code', 'unknown')}, "
+            f"type: {item.get('type', 'Unknown Type')}, "
+            f"{stats}) x{item.get('quantity', 0)}"
         )
     return 0
 

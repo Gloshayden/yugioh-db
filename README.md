@@ -54,7 +54,7 @@ Remove one copy (or use `--all` to remove the card entirely):
 python main.py remove 85639257 --qty 1
 ```
 
-Collection data is stored locally in `collection.json`.
+Collection data is stored locally in `collection.json`, including cached card details (`type`, `types`, `atk`, `def`, and `description`) so your GUI can load them without extra API calls.
 
 ## Reuse in a GUI
 

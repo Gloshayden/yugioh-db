@@ -147,6 +147,11 @@ def add_card_to_collection(
             "set_name": set_name,
             "quantity": 0,
         }
+    existing["type"] = str(target_card.get("type", "Unknown Type"))
+    existing["types"] = [str(part) for part in target_card.get("typeline", []) if isinstance(part, str)]
+    existing["atk"] = target_card.get("atk")
+    existing["def"] = target_card.get("def")
+    existing["description"] = str(target_card.get("desc", ""))
     existing["quantity"] = int(existing.get("quantity", 0)) + quantity
     collection[key] = existing
     save_collection(collection, collection_file)
