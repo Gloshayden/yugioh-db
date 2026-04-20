@@ -10,4 +10,4 @@ wheels/
 .venv
 
 # App generated files
-collection.json
+cache/

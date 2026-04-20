@@ -54,7 +54,16 @@ Remove one copy (or use `--all` to remove the card entirely):
 python main.py remove 85639257 --qty 1
 ```
 
-Collection data is stored locally in `collection.json`, including cached card details (`type`, `types`, `atk`, `def`, and `description`) so your GUI can load them without extra API calls.
+If a card ID has multiple set/print quantities, specify the exact one:
+
+```bash
+python main.py remove 37818794 --set-code RA02-EN021 --all
+```
+
+Collection data is stored locally in `cache/collection.json`, grouped by `card_id` with shared details plus:
+
+- `total_quantity` across all printings
+- `sets` map keyed by `set_code`, each with its own `quantity`
 
 ## Reuse in a GUI
 
@@ -63,4 +72,4 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `resolve_cards_for_identifier(set_identifier)`
 - `add_card_to_collection(set_identifier, card_id, quantity)`
 - `list_collection()`
-- `remove_card_from_collection(card_id, quantity, remove_all)`
+- `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`

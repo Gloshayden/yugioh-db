@@ -41,7 +41,17 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 def cmd_add(args: argparse.Namespace) -> int:
     saved = add_card_to_collection(args.set_code, args.card_id, args.qty)
-    print(f"Saved {saved['name']} from {saved['set_code']}. Quantity now: {saved['quantity']}.")
+    set_code = args.set_code.strip().upper()
+    sets = saved.get("sets", {})
+    set_qty = 0
+    if isinstance(sets, dict):
+        set_entry = sets.get(set_code)
+        if isinstance(set_entry, dict):
+            set_qty = int(set_entry.get("quantity", 0))
+    print(
+        f"Saved {saved['name']} from {set_code}. "
+        f"Set quantity: {set_qty}. Total quantity: {saved.get('total_quantity', 0)}."
+    )
     return 0
 
 
@@ -54,22 +64,41 @@ def cmd_list(_: argparse.Namespace) -> int:
     print("Saved cards:")
     for item in cards:
         stats = f"ATK {item.get('atk', '-')}/DEF {item.get('def', '-')}"
+        sets = item.get("sets", {})
+        set_summary = ""
+        if isinstance(sets, dict):
+            parts = []
+            for code, set_entry in sorted(sets.items()):
+                if isinstance(set_entry, dict):
+                    parts.append(f"{code} x{set_entry.get('quantity', 0)}")
+            set_summary = ", ".join(parts)
         print(
             f"- {item.get('name', 'Unknown Card')} "
             f"(id: {item.get('card_id', 'unknown')}, "
-            f"set: {item.get('set_code', 'unknown')}, "
             f"type: {item.get('type', 'Unknown Type')}, "
-            f"{stats}) x{item.get('quantity', 0)}"
+            f"{stats}, "
+            f"total: {item.get('total_quantity', 0)})"
         )
+        if set_summary:
+            print(f"  sets: {set_summary}")
     return 0
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
-    result = remove_card_from_collection(args.card_id, args.qty, args.all)
+    result = remove_card_from_collection(
+        args.card_id,
+        set_code=args.set_code,
+        quantity=args.qty,
+        remove_all=args.all,
+    )
     if result["removed"]:
         print(f"Removed card id {args.card_id} from your collection.")
     else:
-        print(f"Updated card id {args.card_id}. Quantity now: {result['card']['quantity']}.")
+        updated = result["card"]
+        print(
+            f"Updated card id {args.card_id}. "
+            f"Total quantity now: {updated.get('total_quantity', 0)}."
+        )
     return 0
 
 
@@ -98,6 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     remove_parser = subparsers.add_parser("remove", help="Remove quantity or delete a saved card.")
     remove_parser.add_argument("card_id", type=int, help="Saved card ID.")
+    remove_parser.add_argument(
+        "--set-code",
+        help="Set/print code for selecting one printing under the same card ID.",
+    )
     remove_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to remove.")
     remove_parser.add_argument("--all", action="store_true", help="Remove this card entirely.")
     remove_parser.set_defaults(func=cmd_remove)
