@@ -34,7 +34,7 @@ python GUI.py
 ```
 
 GUI sections:
-- **Search tab**: enter set code/print code, search cards, select a row, add quantity to stock.
+- **Search tab**: enter set code/print code/card name, search cards, select a row, add quantity to stock.
 - **My Stock tab**: shows card name + total quantity; double-click a row to open details.
 - **Stock details popup**: image on the left, with copy/details on the right (name, full description, types, ATK, DEF, set copies, total quantity) plus delete actions (`Remove 1 Copy`, `Remove Selected Print`, `Delete Card`).
 
@@ -61,6 +61,9 @@ Save a card and quantity:
 ```bash
 python CLI.py add YS15 85639257 --qty 2
 
+# You can also add by exact card name:
+python CLI.py add YS15 "Dark Magician" --qty 1
+
 # If a print has multiple rarities, you'll be prompted.
 # You can also pass the rarity directly:
 python CLI.py add RA05-EN127 12345678 --rarity SR --qty 1
@@ -82,12 +85,18 @@ Get Cardmarket price by card ID:
 
 ```bash
 python CLI.py price 37818794 --set-code RA02-EN021
+
+# Or by exact card name:
+python CLI.py price "Red-Eyes Dark Dragoon" --set-code RA02-EN021
 ```
 
 Remove one copy (or use `--all` to remove the card entirely):
 
 ```bash
 python CLI.py remove 85639257 --qty 1
+
+# You can remove by exact saved card name as well:
+python CLI.py remove "Dark Magician" --qty 1
 ```
 
 If a card ID has multiple set/print quantities, specify the exact one:

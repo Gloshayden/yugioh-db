@@ -80,6 +80,104 @@ def get_card_by_id(card_id: int) -> dict[str, object]:
     return card
 
 
+def get_card_by_name(card_name: str) -> dict[str, object]:
+    normalized_name = card_name.strip()
+    if normalized_name == "":
+        raise ValueError("Card name cannot be empty.")
+    encoded_name = quote(normalized_name)
+    data = fetch_json(f"{API_BASE}/cardinfo.php?name={encoded_name}")
+    if not isinstance(data, dict):
+        raise RuntimeError("Unexpected card lookup response format.")
+    cards = data.get("data")
+    if not isinstance(cards, list) or not cards:
+        raise ValueError(f"Card name '{card_name}' was not found.")
+    card = cards[0]
+    if not isinstance(card, dict):
+        raise RuntimeError("Unexpected card lookup item format.")
+    return card
+
+
+def _is_int_text(value: str) -> bool:
+    text = value.strip()
+    return text != "" and text.lstrip("-").isdigit()
+
+
+def _normalize_name(value: str) -> str:
+    return value.strip().casefold()
+
+
+def resolve_card_from_cards(
+    cards: list[dict[str, object]], card_identifier: str | int
+) -> dict[str, object]:
+    if isinstance(card_identifier, int):
+        target_id_text = str(card_identifier)
+        target_name = ""
+    else:
+        raw_identifier = str(card_identifier).strip()
+        if raw_identifier == "":
+            raise ValueError("Card identifier cannot be empty.")
+        target_id_text = raw_identifier if _is_int_text(raw_identifier) else ""
+        target_name = _normalize_name(raw_identifier)
+
+    if target_id_text:
+        by_id = next(
+            (card for card in cards if str(card.get("id")) == target_id_text),
+            None,
+        )
+        if by_id is not None:
+            return by_id
+
+    by_name = [
+        card
+        for card in cards
+        if _normalize_name(str(card.get("name", ""))) == target_name
+    ]
+    if len(by_name) == 1:
+        return by_name[0]
+    if len(by_name) > 1:
+        choices = ", ".join(str(item.get("id", "unknown")) for item in by_name)
+        raise ValueError(
+            f"Multiple cards matched '{card_identifier}' in this set. Use card ID instead: {choices}."
+        )
+
+    raise ValueError(
+        f"Card '{card_identifier}' was not found in this set. Use `search` to view valid card IDs/names."
+    )
+
+
+def resolve_saved_card_id(
+    collection: dict[str, dict[str, object]], card_identifier: str | int
+) -> int:
+    if isinstance(card_identifier, int):
+        return card_identifier
+
+    raw_identifier = str(card_identifier).strip()
+    if raw_identifier == "":
+        raise ValueError("Card identifier cannot be empty.")
+    if _is_int_text(raw_identifier):
+        return int(raw_identifier)
+
+    target_name = _normalize_name(raw_identifier)
+    matches: list[int] = []
+    for item in collection.values():
+        if not isinstance(item, dict):
+            continue
+        if _normalize_name(str(item.get("name", ""))) != target_name:
+            continue
+        card_id = _as_int(item.get("card_id"), -1)
+        if card_id >= 0:
+            matches.append(card_id)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        choices = ", ".join(str(card_id) for card_id in sorted(set(matches)))
+        raise ValueError(
+            f"Multiple saved cards matched '{card_identifier}'. Use card ID instead: {choices}."
+        )
+    raise ValueError(f"Card '{card_identifier}' is not in your saved collection.")
+
+
 def cache_low_res_card_image(
     card_id: int,
     photos_dir: Path = DEFAULT_PHOTOS_DIR,
@@ -386,17 +484,13 @@ def save_collection(
 
 def add_card_to_collection(
     set_identifier: str,
-    card_id: int,
+    card_id: str | int,
     quantity: int = 1,
     rarity_code: str | None = None,
     collection_file: Path = DEFAULT_COLLECTION_FILE,
 ) -> dict[str, object]:
     selected_set_code, set_name, cards = resolve_cards_for_identifier(set_identifier)
-    target_card = next(
-        (card for card in cards if str(card.get("id")) == str(card_id)), None
-    )
-    if target_card is None:
-        raise ValueError(f"Card id '{card_id}' was not found in '{selected_set_code}'.")
+    target_card = resolve_card_from_cards(cards, card_id)
 
     collection = load_collection(collection_file)
     card_id_value = int(target_card["id"])
@@ -523,13 +617,11 @@ def _get_matching_print_variants(
     return variants
 
 
-def get_card_print_variants(set_identifier: str, card_id: int) -> list[dict[str, object]]:
+def get_card_print_variants(
+    set_identifier: str, card_id: str | int
+) -> list[dict[str, object]]:
     selected_set_code, set_name, cards = resolve_cards_for_identifier(set_identifier)
-    target_card = next(
-        (card for card in cards if str(card.get("id")) == str(card_id)), None
-    )
-    if target_card is None:
-        raise ValueError(f"Card id '{card_id}' was not found in '{selected_set_code}'.")
+    target_card = resolve_card_from_cards(cards, card_id)
     return _get_matching_print_variants(target_card, selected_set_code, set_name)
 
 
@@ -543,21 +635,22 @@ def list_collection(
 
 
 def remove_card_from_collection(
-    card_id: int,
+    card_id: str | int,
     set_code: str | None = None,
     quantity: int = 1,
     remove_all: bool = False,
     collection_file: Path = DEFAULT_COLLECTION_FILE,
 ) -> dict[str, object]:
     collection = load_collection(collection_file)
-    key = str(card_id)
+    resolved_card_id = resolve_saved_card_id(collection, card_id)
+    key = str(resolved_card_id)
     card = collection.get(key)
     if card is None:
-        raise ValueError(f"Card id '{card_id}' is not in your saved collection.")
+        raise ValueError(f"Card id '{resolved_card_id}' is not in your saved collection.")
 
     entry_sets = card.get("sets")
     if not isinstance(entry_sets, dict) or not entry_sets:
-        raise ValueError(f"Card id '{card_id}' has no set quantity data.")
+        raise ValueError(f"Card id '{resolved_card_id}' has no set quantity data.")
 
     if set_code is None:
         if remove_all:
@@ -567,7 +660,7 @@ def remove_card_from_collection(
             return {"removed": True, "card": removed}
         if len(entry_sets) > 1:
             raise ValueError(
-                f"Card id '{card_id}' exists under multiple print variants. Use --set-code (for example: RA05-EN127 (SR)) to choose one."
+                f"Card id '{resolved_card_id}' exists under multiple print variants. Use --set-code (for example: RA05-EN127 (SR)) to choose one."
             )
         selected_set_code = next(iter(entry_sets.keys()))
     else:
@@ -587,17 +680,17 @@ def remove_card_from_collection(
                 selected_set_code = matching_keys[0]
             elif len(matching_keys) > 1:
                 raise ValueError(
-                    f"Card id '{card_id}' has multiple rarities for '{parsed_code}'. Use full set code with rarity (for example: {matching_keys[0]})."
+                    f"Card id '{resolved_card_id}' has multiple rarities for '{parsed_code}'. Use full set code with rarity (for example: {matching_keys[0]})."
                 )
             else:
                 raise ValueError(
-                    f"Card id '{card_id}' with set code '{exact_key}' is not in your collection."
+                    f"Card id '{resolved_card_id}' with set code '{exact_key}' is not in your collection."
                 )
 
     set_entry = entry_sets.get(selected_set_code)
     if not isinstance(set_entry, dict):
         raise ValueError(
-            f"Card id '{card_id}' with set code '{selected_set_code}' is not in your collection."
+            f"Card id '{resolved_card_id}' with set code '{selected_set_code}' is not in your collection."
         )
 
     current_set_qty = _as_int(set_entry.get("quantity"), 0)

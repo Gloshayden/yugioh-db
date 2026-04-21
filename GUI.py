@@ -9,9 +9,12 @@ from PIL import Image
 from core import (
     add_card_to_collection,
     cache_low_res_card_image,
+    format_set_display_code,
+    get_card_by_name,
     get_card_print_variants,
     list_collection,
     normalize_rarity_code,
+    parse_set_code_and_rarity,
     remove_card_from_collection,
     resolve_cards_for_identifier,
 )
@@ -51,7 +54,7 @@ def _types_text(card: dict[str, object]) -> str:
 
 def _build_search_section() -> list[list[sg.Element]]:
     return [
-        [sg.Text("Search (set code or print code):")],
+        [sg.Text("Search (set code, print code, or card name):")],
         [
             sg.Input(key=SEARCH_INPUT_KEY, size=(24, 1)),
             sg.Button("Search", key=SEARCH_BUTTON_KEY),
@@ -59,9 +62,9 @@ def _build_search_section() -> list[list[sg.Element]]:
         [
             sg.Table(
                 values=[],
-                headings=["Card ID", "Name", "Type"],
+                headings=["Card ID", "Name", "Type", "Print"],
                 auto_size_columns=False,
-                col_widths=[12, 35, 20],
+                col_widths=[10, 29, 18, 20],
                 key=SEARCH_RESULTS_KEY,
                 enable_events=True,
                 justification="left",
@@ -122,17 +125,64 @@ def _safe_int(value: object, default: int = 0) -> int:
         return default
 
 
-def _search_rows(cards: list[dict[str, object]]) -> list[list[str]]:
+def _search_rows(search_entries: list[dict[str, object]]) -> list[list[str]]:
     rows: list[list[str]] = []
-    for card in cards:
+    for entry in search_entries:
+        card = entry.get("card")
+        if not isinstance(card, dict):
+            continue
         rows.append(
             [
                 str(card.get("id", "")),
                 str(card.get("name", "Unknown Card")),
                 str(card.get("type", "Unknown Type")),
+                str(entry.get("display_code", "")),
             ]
         )
     return rows
+
+
+def _search_entries_for_set(
+    set_identifier: str, cards: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    return [
+        {
+            "card": card,
+            "set_identifier": set_identifier,
+            "display_code": set_identifier,
+        }
+        for card in cards
+        if isinstance(card, dict)
+    ]
+
+
+def _search_entries_for_card_name(card: dict[str, object]) -> list[dict[str, object]]:
+    raw_sets = card.get("card_sets")
+    if not isinstance(raw_sets, list):
+        return []
+
+    entries: list[dict[str, object]] = []
+    seen_display_codes: set[str] = set()
+    for item in raw_sets:
+        if not isinstance(item, dict):
+            continue
+        set_code = str(item.get("set_code", "")).strip().upper()
+        if set_code == "":
+            continue
+        rarity_code = normalize_rarity_code(item.get("set_rarity_code"))
+        display_code = format_set_display_code(set_code, rarity_code)
+        if display_code in seen_display_codes:
+            continue
+        seen_display_codes.add(display_code)
+        entries.append(
+            {
+                "card": card,
+                "set_identifier": display_code,
+                "display_code": display_code,
+            }
+        )
+    entries.sort(key=lambda entry: str(entry.get("display_code", "")))
+    return entries
 
 
 def _stock_rows(cards: list[dict[str, object]]) -> list[list[str]]:
@@ -330,7 +380,7 @@ def main() -> None:
     window = sg.Window("Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True)
     window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
 
-    search_cards: list[dict[str, object]] = []
+    search_entries: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
 
     while True:
@@ -340,23 +390,32 @@ def main() -> None:
             break
 
         if event == SEARCH_BUTTON_KEY:
-            set_identifier = str(values.get(SEARCH_INPUT_KEY, "")).strip()
-            if not set_identifier:
+            search_text = str(values.get(SEARCH_INPUT_KEY, "")).strip()
+            if not search_text:
                 sg.popup_error(
-                    "Enter a set code or print code (for example: RA02-EN021)."
+                    "Enter a set code, print code, or card name."
                 )
                 continue
             try:
-                _, _, cards = resolve_cards_for_identifier(set_identifier)
-                search_cards = cards
-                window[SEARCH_RESULTS_KEY].update(values=_search_rows(cards))
+                resolved_identifier, _, cards = resolve_cards_for_identifier(search_text)
+                search_entries = _search_entries_for_set(resolved_identifier, cards)
+                window[SEARCH_RESULTS_KEY].update(values=_search_rows(search_entries))
             except (RuntimeError, ValueError) as exc:
-                sg.popup_error(str(exc))
+                try:
+                    card = get_card_by_name(search_text)
+                    search_entries = _search_entries_for_card_name(card)
+                    if not search_entries:
+                        raise ValueError(
+                            f"Card '{search_text}' was found but has no printable set data."
+                        )
+                    window[SEARCH_RESULTS_KEY].update(values=_search_rows(search_entries))
+                except (RuntimeError, ValueError):
+                    sg.popup_error(str(exc))
             continue
 
         if event == ADD_BUTTON_KEY:
             row_index = _selected_table_index(values, SEARCH_RESULTS_KEY)
-            if row_index is None or row_index < 0 or row_index >= len(search_cards):
+            if row_index is None or row_index < 0 or row_index >= len(search_entries):
                 sg.popup_error("Select a card from search results first.")
                 continue
 
@@ -365,21 +424,26 @@ def main() -> None:
                 sg.popup_error("Quantity must be greater than 0.")
                 continue
 
-            set_identifier = str(values.get(SEARCH_INPUT_KEY, "")).strip()
-            if not set_identifier:
-                sg.popup_error("Set code or print code is required.")
+            selected_entry = search_entries[row_index]
+            selected_card = selected_entry.get("card")
+            if not isinstance(selected_card, dict):
+                sg.popup_error("Selected search result is invalid.")
                 continue
-
-            selected_card = search_cards[row_index]
             card_id = _safe_int(selected_card.get("id"), -1)
             if card_id < 0:
                 sg.popup_error("Selected result does not include a valid card ID.")
                 continue
 
+            set_identifier = str(selected_entry.get("set_identifier", "")).strip()
+            if set_identifier == "":
+                sg.popup_error("Selected result does not include a valid print code.")
+                continue
+
             try:
                 variants = get_card_print_variants(set_identifier, card_id)
-                selected_rarity: str | None = None
-                if len(variants) > 1:
+                _, selected_row_rarity = parse_set_code_and_rarity(set_identifier)
+                selected_rarity = normalize_rarity_code(selected_row_rarity)
+                if selected_rarity is None and len(variants) > 1:
                     options = ", ".join(
                         str(item.get("display_code")) for item in variants
                     )

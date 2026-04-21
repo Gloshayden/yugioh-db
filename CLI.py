@@ -5,6 +5,7 @@ import argparse
 from core import (
     add_card_to_collection,
     format_set_display_code,
+    get_card_by_name,
     get_card_print_variants,
     list_collection,
     normalize_rarity_code,
@@ -44,7 +45,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
-    variants = get_card_print_variants(args.set_code, args.card_id)
+    variants = get_card_print_variants(args.set_code, args.card)
     selected_rarity = normalize_rarity_code(args.rarity)
     selected_display_code = args.set_code.strip().upper()
 
@@ -101,7 +102,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         )
 
     saved = add_card_to_collection(
-        args.set_code, args.card_id, args.qty, rarity_code=selected_rarity
+        args.set_code, args.card, args.qty, rarity_code=selected_rarity
     )
 
     sets = saved.get("sets", {})
@@ -149,24 +150,29 @@ def cmd_list(_: argparse.Namespace) -> int:
 
 def cmd_remove(args: argparse.Namespace) -> int:
     result = remove_card_from_collection(
-        args.card_id,
+        args.card,
         set_code=args.set_code,
         quantity=args.qty,
         remove_all=args.all,
     )
     if result["removed"]:
-        print(f"Removed card id {args.card_id} from your collection.")
+        print(f"Removed card {args.card} from your collection.")
     else:
         updated = result["card"]
         print(
-            f"Updated card id {args.card_id}. "
+            f"Updated card {args.card}. "
             f"Total quantity now: {updated.get('total_quantity', 0)}."
         )
     return 0
 
 
 def cmd_price(args: argparse.Namespace) -> int:
-    result = get_cardmarket_price_by_card_id(args.card_id, args.set_code)
+    if str(args.card).strip().lstrip("-").isdigit():
+        card_id = int(str(args.card).strip())
+    else:
+        card = get_card_by_name(args.card)
+        card_id = int(card["id"])
+    result = get_cardmarket_price_by_card_id(card_id, args.set_code)
     print(
         f"{result['name']} ({result['set_code']}): "
         f"{result['price']} {result['currency']} [{result['source']}]"
@@ -190,7 +196,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_parser = subparsers.add_parser("add", help="Save a card from a set to your collection.")
     add_parser.add_argument("set_code", help="Set code or full print code containing the card.")
-    add_parser.add_argument("card_id", type=int, help="Card ID from `search` output.")
+    add_parser.add_argument(
+        "card",
+        help="Card ID or exact card name from `search` output.",
+    )
     add_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to add.")
     add_parser.add_argument(
         "--rarity",
@@ -202,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.set_defaults(func=cmd_list)
 
     remove_parser = subparsers.add_parser("remove", help="Remove quantity or delete a saved card.")
-    remove_parser.add_argument("card_id", type=int, help="Saved card ID.")
+    remove_parser.add_argument("card", help="Saved card ID or exact card name.")
     remove_parser.add_argument(
         "--set-code",
         help="Set/print code for selecting one printing under the same card ID.",
@@ -212,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     remove_parser.set_defaults(func=cmd_remove)
 
     price_parser = subparsers.add_parser("price", help="Get Cardmarket price by card ID.")
-    price_parser.add_argument("card_id", type=int, help="Card ID.")
+    price_parser.add_argument("card", help="Card ID or exact card name.")
     price_parser.add_argument("--set-code", help="Optional set/print code (for example: RA02-EN021).")
     price_parser.set_defaults(func=cmd_price)
 
