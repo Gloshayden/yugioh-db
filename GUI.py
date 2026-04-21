@@ -37,6 +37,7 @@ ADD_BUTTON_KEY = "-ADD-BTN-"
 STOCK_TABLE_KEY = "-STOCK-TABLE-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
+STOCK_TOTAL_VALUE_KEY = "-STOCK-TOTAL-VALUE-"
 MAIN_TABS_KEY = "-MAIN-TABS-"
 SEARCH_TAB_KEY = "-SEARCH-TAB-"
 STOCK_TAB_KEY = "-STOCK-TAB-"
@@ -128,6 +129,7 @@ def _build_stock_section() -> list[list[sg.Element]]:
             ),
             sg.Button("Refresh", key=REFRESH_STOCK_KEY),
         ],
+        [sg.Text("Total stock value: 0.00 EUR", key=STOCK_TOTAL_VALUE_KEY)],
     ]
 
 
@@ -323,9 +325,51 @@ def _stock_rows(cards: list[dict[str, object]]) -> list[list[str]]:
     return rows
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return default
+
+
+def _stock_total_value(cards: list[dict[str, object]]) -> tuple[float, int]:
+    total_value = 0.0
+    missing_prices = 0
+    for card in cards:
+        card_id = _safe_int(card.get("card_id"), -1)
+        if card_id < 0:
+            continue
+        sets = card.get("sets")
+        if not isinstance(sets, dict):
+            continue
+        for code, set_info in sets.items():
+            if not isinstance(set_info, dict):
+                continue
+            quantity = _safe_int(set_info.get("quantity"), 0)
+            if quantity <= 0:
+                continue
+            display_code = str(set_info.get("display_code", code))
+            try:
+                price_info = get_cardmarket_price_by_card_id(card_id, display_code)
+            except (RuntimeError, ValueError):
+                missing_prices += 1
+                continue
+            price = _as_float(price_info.get("price"), -1.0)
+            if price < 0:
+                missing_prices += 1
+                continue
+            total_value += price * quantity
+    return total_value, missing_prices
+
+
 def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
     cards = list_collection()
     window[STOCK_TABLE_KEY].update(values=_stock_rows(cards))
+    total_value, missing_prices = _stock_total_value(cards)
+    value_text = f"Total stock value: {total_value:.2f} EUR"
+    if missing_prices > 0:
+        value_text += f" (missing price for {missing_prices} prints)"
+    window[STOCK_TOTAL_VALUE_KEY].update(value_text)
     return cards
 
 

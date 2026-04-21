@@ -35,7 +35,7 @@ python GUI.py
 
 GUI sections:
 - **Search tab**: enter set code/print code/card name, search cards, select a row, add quantity to stock.
-- **My Stock tab**: shows card name + total quantity; double-click a row to open details.
+- **My Stock tab**: shows card name + total quantity and total stock value; double-click a row to open details.
 - **Stock details popup**: image on the left, with copy/details on the right (name, full description, types, ATK, DEF, set copies, total quantity) plus delete actions (`Remove 1 Copy`, `Remove Selected Print`, `Delete Card`).
 - **Deck Builder tab**: create decks, mark them as `current`/`future`, add/remove cards by ID or name, filter deck cards by section (`all/main/extra/side`), and import/export `.ydk` files.
 
