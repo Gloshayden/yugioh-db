@@ -9,7 +9,9 @@ from PIL import Image
 from core import (
     add_card_to_collection,
     cache_low_res_card_image,
+    get_card_print_variants,
     list_collection,
+    normalize_rarity_code,
     resolve_cards_for_identifier,
 )
 
@@ -168,9 +170,10 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
         if isinstance(raw_sets, dict):
             for code, set_info in sorted(raw_sets.items()):
                 if isinstance(set_info, dict):
-                    price = get_cardmarket_price_by_card_id(card_id, code)
+                    display_code = str(set_info.get("display_code", code))
+                    price = get_cardmarket_price_by_card_id(card_id, display_code)
                     set_lines.append(
-                        f"{code} x{set_info.get('quantity', 0)}. CM price {price['price']} EUR"
+                        f"{display_code} x{set_info.get('quantity', 0)}. CM price {price['price']} EUR"
                     )
         sets_text = "\n".join(set_lines) if set_lines else "No set breakdown"
 
@@ -307,7 +310,25 @@ def main() -> None:
                 continue
 
             try:
-                add_card_to_collection(set_identifier, card_id, qty)
+                variants = get_card_print_variants(set_identifier, card_id)
+                selected_rarity: str | None = None
+                if len(variants) > 1:
+                    options = ", ".join(
+                        str(item.get("display_code")) for item in variants
+                    )
+                    user_input = sg.popup_get_text(
+                        "Multiple rarities found.\n"
+                        f"Available: {options}\n\n"
+                        "Enter rarity code (for example: SR):",
+                        title="Choose Rarity",
+                    )
+                    selected_rarity = normalize_rarity_code(user_input)
+                    if selected_rarity is None:
+                        raise ValueError("Rarity selection is required.")
+
+                add_card_to_collection(
+                    set_identifier, card_id, qty, rarity_code=selected_rarity
+                )
                 stock_cards = _refresh_stock(window)
                 sg.popup_no_titlebar(
                     "Card added to stock.", auto_close=True, auto_close_duration=1.2

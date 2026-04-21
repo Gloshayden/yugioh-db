@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote, urlparse
@@ -9,6 +10,7 @@ from urllib.request import Request, urlopen
 API_BASE = "https://db.ygoprodeck.com/api/v7"
 DEFAULT_COLLECTION_FILE = Path("cache/collection.json")
 DEFAULT_PHOTOS_DIR = Path("cache/images")
+RARITY_CODE_PATTERN = re.compile(r"^\s*(?P<code>.+?)(?:\s*\((?P<rarity>[^()]+)\))?\s*$")
 
 
 def fetch_json(url: str) -> object:
@@ -36,7 +38,7 @@ def get_all_sets() -> list[dict[str, object]]:
 
 
 def parse_set_identifier(set_identifier: str) -> tuple[str, str | None]:
-    normalized = set_identifier.strip().upper()
+    normalized, _ = parse_set_code_and_rarity(set_identifier)
     if "-" not in normalized:
         return normalized, None
     set_prefix, _, _print_suffix = normalized.partition("-")
@@ -167,6 +169,35 @@ def normalize_set_code(set_code: str) -> str:
     return set_code.strip().upper()
 
 
+def normalize_rarity_code(rarity_code: object) -> str | None:
+    if rarity_code is None:
+        return None
+    normalized = str(rarity_code).strip().upper()
+    if normalized.startswith("(") and normalized.endswith(")"):
+        normalized = normalized[1:-1].strip()
+    return normalized or None
+
+
+def parse_set_code_and_rarity(set_value: str) -> tuple[str, str | None]:
+    raw = set_value.strip()
+    if raw == "":
+        return "", None
+    match = RARITY_CODE_PATTERN.match(raw)
+    if match is None:
+        return normalize_set_code(raw), None
+    code = normalize_set_code(match.group("code"))
+    rarity = normalize_rarity_code(match.group("rarity"))
+    return code, rarity
+
+
+def format_set_display_code(set_code: str, rarity_code: str | None = None) -> str:
+    normalized_code = normalize_set_code(set_code)
+    normalized_rarity = normalize_rarity_code(rarity_code)
+    if normalized_rarity is None:
+        return normalized_code
+    return f"{normalized_code} ({normalized_rarity})"
+
+
 def _as_int(value: object, default: int = 0) -> int:
     try:
         return int(value)
@@ -214,19 +245,32 @@ def _recompute_totals(entry: dict[str, object]) -> None:
     for key, raw_set in raw_sets.items():
         if not isinstance(raw_set, dict):
             continue
-        code = normalize_set_code(str(raw_set.get("set_code", key)))
+        key_code, key_rarity = parse_set_code_and_rarity(str(key))
+        code = normalize_set_code(str(raw_set.get("set_code", key_code)))
         if code == "":
             continue
+        rarity_code = normalize_rarity_code(
+            raw_set.get("rarity_code", raw_set.get("set_rarity_code", key_rarity))
+        )
+        rarity_name = str(
+            raw_set.get("rarity", raw_set.get("set_rarity", ""))
+        ).strip()
         qty = _as_int(raw_set.get("quantity"), 0)
         if qty <= 0:
             continue
         set_name = str(raw_set.get("set_name", "Unknown Set"))
-        if code in normalized_sets:
-            normalized_sets[code]["quantity"] = _as_int(normalized_sets[code]["quantity"], 0) + qty
+        display_code = format_set_display_code(code, rarity_code)
+        if display_code in normalized_sets:
+            normalized_sets[display_code]["quantity"] = _as_int(
+                normalized_sets[display_code]["quantity"], 0
+            ) + qty
         else:
-            normalized_sets[code] = {
+            normalized_sets[display_code] = {
                 "set_code": code,
                 "set_name": set_name,
+                "display_code": display_code,
+                "rarity_code": rarity_code,
+                "rarity": rarity_name,
                 "quantity": qty,
             }
         total += qty
@@ -278,17 +322,40 @@ def load_collection(
             for set_key, set_value in value_sets.items():
                 if not isinstance(set_value, dict):
                     continue
-                code = normalize_set_code(str(set_value.get("set_code", set_key)))
+                key_code, key_rarity = parse_set_code_and_rarity(str(set_key))
+                code = normalize_set_code(str(set_value.get("set_code", key_code)))
                 if code == "":
                     continue
+                rarity_code = normalize_rarity_code(
+                    set_value.get(
+                        "rarity_code", set_value.get("set_rarity_code", key_rarity)
+                    )
+                )
+                rarity_name = str(
+                    set_value.get("rarity", set_value.get("set_rarity", ""))
+                ).strip()
+                display_code = format_set_display_code(code, rarity_code)
                 qty = _as_int(set_value.get("quantity"), 0)
                 if qty <= 0:
                     continue
                 set_name = str(set_value.get("set_name", value.get("set_name", "Unknown Set")))
-                existing_set = entry_sets.get(code, {"set_code": code, "set_name": set_name, "quantity": 0})
+                existing_set = entry_sets.get(
+                    display_code,
+                    {
+                        "set_code": code,
+                        "set_name": set_name,
+                        "display_code": display_code,
+                        "rarity_code": rarity_code,
+                        "rarity": rarity_name,
+                        "quantity": 0,
+                    },
+                )
                 existing_set["set_name"] = set_name
+                existing_set["display_code"] = display_code
+                existing_set["rarity_code"] = rarity_code
+                existing_set["rarity"] = rarity_name
                 existing_set["quantity"] = _as_int(existing_set.get("quantity"), 0) + qty
-                entry_sets[code] = existing_set
+                entry_sets[display_code] = existing_set
         else:
             old_set_code = value.get("set_code")
             if isinstance(old_set_code, str) and old_set_code.strip() != "":
@@ -321,6 +388,7 @@ def add_card_to_collection(
     set_identifier: str,
     card_id: int,
     quantity: int = 1,
+    rarity_code: str | None = None,
     collection_file: Path = DEFAULT_COLLECTION_FILE,
 ) -> dict[str, object]:
     selected_set_code, set_name, cards = resolve_cards_for_identifier(set_identifier)
@@ -347,18 +415,122 @@ def add_card_to_collection(
         entry_sets = {}
         entry["sets"] = entry_sets
 
-    set_code = normalize_set_code(selected_set_code)
-    set_entry = entry_sets.get(set_code)
+    matching_prints = _get_matching_print_variants(
+        target_card, selected_set_code, set_name
+    )
+
+    if rarity_code is not None:
+        target_rarity = normalize_rarity_code(rarity_code)
+        matching_prints = [
+            print_info
+            for print_info in matching_prints
+            if normalize_rarity_code(print_info.get("rarity_code")) == target_rarity
+        ]
+        if not matching_prints:
+            raise ValueError(
+                f"Rarity '{rarity_code}' was not found for card id '{card_id}' in '{selected_set_code}'."
+            )
+
+    if len(matching_prints) > 1:
+        options = ", ".join(str(item.get("display_code")) for item in matching_prints)
+        raise ValueError(
+            f"Multiple rarities found for this print. Choose one rarity code from: {options}."
+        )
+
+    if matching_prints:
+        selected_print = matching_prints[0]
+        set_code = str(selected_print.get("set_code", selected_set_code))
+        set_name = str(selected_print.get("set_name", set_name))
+        selected_rarity = normalize_rarity_code(selected_print.get("rarity_code"))
+        selected_rarity_name = str(selected_print.get("rarity", ""))
+    else:
+        set_code = normalize_set_code(selected_set_code)
+        selected_rarity = normalize_rarity_code(rarity_code)
+        selected_rarity_name = ""
+
+    display_code = format_set_display_code(set_code, selected_rarity)
+    set_entry = entry_sets.get(display_code)
     if not isinstance(set_entry, dict):
-        set_entry = {"set_code": set_code, "set_name": set_name, "quantity": 0}
+        set_entry = {
+            "set_code": set_code,
+            "set_name": set_name,
+            "display_code": display_code,
+            "rarity_code": selected_rarity,
+            "rarity": selected_rarity_name,
+            "quantity": 0,
+        }
     set_entry["set_name"] = set_name
+    set_entry["display_code"] = display_code
+    set_entry["rarity_code"] = selected_rarity
+    set_entry["rarity"] = selected_rarity_name
     set_entry["quantity"] = _as_int(set_entry.get("quantity"), 0) + quantity
-    entry_sets[set_code] = set_entry
+    entry_sets[display_code] = set_entry
 
     _recompute_totals(entry)
 
     save_collection(collection, collection_file)
     return entry
+
+
+def _get_matching_print_variants(
+    card: dict[str, object], selected_set_code: str, selected_set_name: str
+) -> list[dict[str, object]]:
+    card_sets = card.get("card_sets")
+    if not isinstance(card_sets, list):
+        return []
+
+    normalized_selected_code = normalize_set_code(selected_set_code)
+    normalized_selected_name = selected_set_name.strip().lower()
+
+    variants: list[dict[str, object]] = []
+    seen: set[tuple[str, str | None]] = set()
+    for item in card_sets:
+        if not isinstance(item, dict):
+            continue
+        print_code = normalize_set_code(str(item.get("set_code", "")))
+        if print_code == "":
+            continue
+
+        item_set_name = str(item.get("set_name", "")).strip().lower()
+        code_matches = (
+            print_code == normalized_selected_code
+            or print_code.startswith(f"{normalized_selected_code}-")
+        )
+        if not code_matches and item_set_name != normalized_selected_name:
+            continue
+
+        item_rarity_code = normalize_rarity_code(item.get("set_rarity_code"))
+        dedupe_key = (print_code, item_rarity_code)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        variants.append(
+            {
+                "set_code": print_code,
+                "set_name": str(item.get("set_name", selected_set_name)),
+                "rarity": str(item.get("set_rarity", "")).strip(),
+                "rarity_code": item_rarity_code,
+                "display_code": format_set_display_code(print_code, item_rarity_code),
+            }
+        )
+
+    variants.sort(
+        key=lambda item: (
+            str(item.get("set_code", "")),
+            str(item.get("rarity_code", "")),
+        )
+    )
+    return variants
+
+
+def get_card_print_variants(set_identifier: str, card_id: int) -> list[dict[str, object]]:
+    selected_set_code, set_name, cards = resolve_cards_for_identifier(set_identifier)
+    target_card = next(
+        (card for card in cards if str(card.get("id")) == str(card_id)), None
+    )
+    if target_card is None:
+        raise ValueError(f"Card id '{card_id}' was not found in '{selected_set_code}'.")
+    return _get_matching_print_variants(target_card, selected_set_code, set_name)
 
 
 def list_collection(
@@ -395,11 +567,32 @@ def remove_card_from_collection(
             return {"removed": True, "card": removed}
         if len(entry_sets) > 1:
             raise ValueError(
-                f"Card id '{card_id}' exists under multiple set codes. Use --set-code to choose one."
+                f"Card id '{card_id}' exists under multiple print variants. Use --set-code (for example: RA05-EN127 (SR)) to choose one."
             )
         selected_set_code = next(iter(entry_sets.keys()))
     else:
-        selected_set_code = normalize_set_code(set_code)
+        parsed_code, parsed_rarity = parse_set_code_and_rarity(set_code)
+        exact_key = format_set_display_code(parsed_code, parsed_rarity)
+        if exact_key in entry_sets:
+            selected_set_code = exact_key
+        else:
+            matching_keys: list[str] = []
+            for key_name, set_value in entry_sets.items():
+                if not isinstance(set_value, dict):
+                    continue
+                stored_code = normalize_set_code(str(set_value.get("set_code", "")))
+                if stored_code == parsed_code:
+                    matching_keys.append(key_name)
+            if len(matching_keys) == 1:
+                selected_set_code = matching_keys[0]
+            elif len(matching_keys) > 1:
+                raise ValueError(
+                    f"Card id '{card_id}' has multiple rarities for '{parsed_code}'. Use full set code with rarity (for example: {matching_keys[0]})."
+                )
+            else:
+                raise ValueError(
+                    f"Card id '{card_id}' with set code '{exact_key}' is not in your collection."
+                )
 
     set_entry = entry_sets.get(selected_set_code)
     if not isinstance(set_entry, dict):

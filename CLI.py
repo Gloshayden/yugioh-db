@@ -4,7 +4,10 @@ import argparse
 
 from core import (
     add_card_to_collection,
+    format_set_display_code,
+    get_card_print_variants,
     list_collection,
+    normalize_rarity_code,
     remove_card_from_collection,
     resolve_cards_for_identifier,
     search_set_codes,
@@ -41,16 +44,74 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
-    saved = add_card_to_collection(args.set_code, args.card_id, args.qty)
-    set_code = args.set_code.strip().upper()
+    variants = get_card_print_variants(args.set_code, args.card_id)
+    selected_rarity = normalize_rarity_code(args.rarity)
+    selected_display_code = args.set_code.strip().upper()
+
+    if variants:
+        chosen_variant: dict[str, object] | None = None
+        if selected_rarity is not None:
+            chosen_variant = next(
+                (
+                    variant
+                    for variant in variants
+                    if normalize_rarity_code(variant.get("rarity_code")) == selected_rarity
+                ),
+                None,
+            )
+            if chosen_variant is None:
+                options = ", ".join(str(item.get("display_code")) for item in variants)
+                raise ValueError(
+                    f"Rarity '{args.rarity}' is not available. Choose one of: {options}."
+                )
+        elif len(variants) > 1:
+            print("Multiple rarities found for this print:")
+            for variant in variants:
+                print(f"- {variant.get('display_code')}")
+            chosen_input = input("Enter rarity code (for example SR): ").strip()
+            selected_rarity = normalize_rarity_code(chosen_input)
+            if selected_rarity is None:
+                raise ValueError("Rarity code is required when multiple rarities exist.")
+            chosen_variant = next(
+                (
+                    variant
+                    for variant in variants
+                    if normalize_rarity_code(variant.get("rarity_code")) == selected_rarity
+                ),
+                None,
+            )
+            if chosen_variant is None:
+                options = ", ".join(str(item.get("display_code")) for item in variants)
+                raise ValueError(
+                    f"Rarity '{chosen_input}' is not available. Choose one of: {options}."
+                )
+        else:
+            chosen_variant = variants[0]
+
+        if chosen_variant is not None:
+            selected_rarity = normalize_rarity_code(chosen_variant.get("rarity_code"))
+            selected_display_code = str(chosen_variant.get("display_code", selected_display_code))
+        elif selected_rarity is not None:
+            selected_display_code = format_set_display_code(
+                args.set_code.strip().upper(), selected_rarity
+            )
+    elif selected_rarity is not None:
+        selected_display_code = format_set_display_code(
+            args.set_code.strip().upper(), selected_rarity
+        )
+
+    saved = add_card_to_collection(
+        args.set_code, args.card_id, args.qty, rarity_code=selected_rarity
+    )
+
     sets = saved.get("sets", {})
     set_qty = 0
     if isinstance(sets, dict):
-        set_entry = sets.get(set_code)
+        set_entry = sets.get(selected_display_code)
         if isinstance(set_entry, dict):
             set_qty = int(set_entry.get("quantity", 0))
     print(
-        f"Saved {saved['name']} from {set_code}. "
+        f"Saved {saved['name']} from {selected_display_code}. "
         f"Set quantity: {set_qty}. Total quantity: {saved.get('total_quantity', 0)}."
     )
     return 0
@@ -71,7 +132,8 @@ def cmd_list(_: argparse.Namespace) -> int:
             parts = []
             for code, set_entry in sorted(sets.items()):
                 if isinstance(set_entry, dict):
-                    parts.append(f"{code} x{set_entry.get('quantity', 0)}")
+                    display = str(set_entry.get("display_code", code))
+                    parts.append(f"{display} x{set_entry.get('quantity', 0)}")
             set_summary = ", ".join(parts)
         print(
             f"- {item.get('name', 'Unknown Card')} "
@@ -130,6 +192,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("set_code", help="Set code or full print code containing the card.")
     add_parser.add_argument("card_id", type=int, help="Card ID from `search` output.")
     add_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to add.")
+    add_parser.add_argument(
+        "--rarity",
+        help="Optional rarity code (for example: SR, UR). If omitted and multiple rarities exist, you'll be prompted.",
+    )
     add_parser.set_defaults(func=cmd_add)
 
     list_parser = subparsers.add_parser("list", help="Show saved cards and quantities.")

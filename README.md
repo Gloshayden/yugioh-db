@@ -60,6 +60,10 @@ Save a card and quantity:
 
 ```bash
 python CLI.py add YS15 85639257 --qty 2
+
+# If a print has multiple rarities, you'll be prompted.
+# You can also pass the rarity directly:
+python CLI.py add RA05-EN127 12345678 --rarity SR --qty 1
 ```
 
 You can also add by full print code:
@@ -90,6 +94,9 @@ If a card ID has multiple set/print quantities, specify the exact one:
 
 ```bash
 python CLI.py remove 37818794 --set-code RA02-EN021 --all
+
+# Includes rarity-specific variants:
+python CLI.py remove 37818794 --set-code "RA05-EN127 (SR)" --all
 ```
 
 Collection data is stored locally in `cache/collection.json`, grouped by `card_id` with shared details plus:
@@ -107,4 +114,3 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`
 - `cache_low_res_card_image(card_id)` saves to `cache/images/{card_id}.jpg` (or source image extension)
 - `get_cardmarket_price_by_card_id(card_id, set_code=None)` from `pricing.py`
-

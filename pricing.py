@@ -4,7 +4,12 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from core import get_card_by_id, normalize_set_code
+from core import (
+    get_card_by_id,
+    normalize_rarity_code,
+    normalize_set_code,
+    parse_set_code_and_rarity,
+)
 
 CARDMARKET_BASE = "https://www.cardmarket.com/en/YuGiOh/Products/Singles"
 
@@ -39,12 +44,13 @@ def _resolve_set_info(card: dict[str, object], set_code: str | None) -> tuple[st
         raise ValueError("Card does not include set data.")
 
     if set_code:
-        target = normalize_set_code(set_code)
+        target, target_rarity = parse_set_code_and_rarity(set_code)
         for item in card_sets:
             if not isinstance(item, dict):
                 continue
             code = normalize_set_code(str(item.get("set_code", "")))
-            if code == target:
+            rarity = normalize_rarity_code(item.get("set_rarity_code"))
+            if code == target and (target_rarity is None or rarity == target_rarity):
                 return code, str(item.get("set_name", "Unknown Set"))
         raise ValueError(f"Set code '{set_code}' not found for this card.")
 
