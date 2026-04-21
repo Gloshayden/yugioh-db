@@ -12,6 +12,19 @@ Simple CLI app to search Yu-Gi-Oh cards by **set code** and track how many copie
 python main.py --help
 ```
 
+## GUI
+
+Launch the GUI:
+
+```bash
+python GUI.py
+```
+
+GUI sections:
+- **Search**: enter set code/print code, search cards, select a row, add quantity to stock.
+- **My Stock**: shows card name + total quantity; double-click a row to open details.
+- **Stock details popup**: shows image on the left and name, full description, types, ATK, DEF on the right.
+
 Find a set code (if you only know part of the set name):
 
 ```bash
@@ -79,4 +92,5 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `add_card_to_collection(set_identifier, card_id, quantity)`
 - `list_collection()`
 - `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`
+- `cache_low_res_card_image(card_id)` saves to `cache/images/{card_id}.jpg` (or source image extension)
 - `get_cardmarket_price_by_card_id(card_id, set_code=None)` from `pricing.py`

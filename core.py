@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from urllib.error import URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 API_BASE = "https://db.ygoprodeck.com/api/v7"
 DEFAULT_COLLECTION_FILE = Path("cache/collection.json")
+DEFAULT_PHOTOS_DIR = Path("cache/images")
 
 
 def fetch_json(url: str) -> object:
@@ -75,6 +76,47 @@ def get_card_by_id(card_id: int) -> dict[str, object]:
     if not isinstance(card, dict):
         raise RuntimeError("Unexpected card lookup item format.")
     return card
+
+
+def cache_low_res_card_image(
+    card_id: int,
+    photos_dir: Path = DEFAULT_PHOTOS_DIR,
+    overwrite: bool = False,
+) -> Path:
+    card = get_card_by_id(card_id)
+    raw_images = card.get("card_images")
+    if not isinstance(raw_images, list) or not raw_images:
+        raise ValueError(f"Card id '{card_id}' does not include image data.")
+
+    image_info = raw_images[0]
+    if not isinstance(image_info, dict):
+        raise RuntimeError("Unexpected card image data format.")
+
+    image_url = image_info.get("image_url_small") or image_info.get("image_url")
+    if not isinstance(image_url, str) or image_url.strip() == "":
+        raise ValueError(f"Card id '{card_id}' does not include a valid image URL.")
+
+    suffix = Path(urlparse(image_url).path).suffix or ".jpg"
+    photos_dir.mkdir(parents=True, exist_ok=True)
+    file_path = photos_dir / f"{int(card_id)}{suffix}"
+    if file_path.exists() and not overwrite:
+        return file_path
+
+    try:
+        request = Request(
+            image_url,
+            headers={
+                "User-Agent": "yugioh-db-cli/0.1 (+https://github.com/)",
+                "Accept": "image/*",
+            },
+        )
+        with urlopen(request, timeout=20) as response:
+            image_bytes = response.read()
+    except URLError as exc:
+        raise RuntimeError(f"Failed to download card image: {exc.reason}") from exc
+
+    file_path.write_bytes(image_bytes)
+    return file_path
 
 
 def find_cards_by_print_code(
