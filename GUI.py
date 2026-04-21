@@ -209,6 +209,7 @@ def _build_deck_section() -> list[list[sg.Element]]:
                             values=["all", "main", "extra", "side"],
                             default_value="all",
                             readonly=True,
+                            enable_events=True,
                             key=DECK_CARD_FILTER_KEY,
                             size=(10, 1),
                         )
