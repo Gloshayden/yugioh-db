@@ -12,6 +12,7 @@ from core import (
     get_card_print_variants,
     list_collection,
     normalize_rarity_code,
+    remove_card_from_collection,
     resolve_cards_for_identifier,
 )
 
@@ -152,10 +153,15 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
     return cards
 
 
-def _open_stock_detail_popup(card: dict[str, object]) -> None:
+def _open_stock_detail_popup(card: dict[str, object]) -> bool:
     card_id = _safe_int(card.get("card_id"), -1)
     if card_id < 0:
         raise ValueError("Selected card does not have a valid card id.")
+
+    detail_sets_key = "-DETAIL-SETS-"
+    remove_one_key = "-DETAIL-REMOVE-ONE-"
+    remove_set_key = "-DETAIL-REMOVE-SET-"
+    delete_card_key = "-DETAIL-DELETE-CARD-"
 
     def _image_data_for_gui(image_path: Path) -> bytes:
         with Image.open(image_path) as image:
@@ -164,18 +170,30 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
             rgb_image.save(buffer, format="PNG")
             return buffer.getvalue()
 
-    def _detail_copy_layout() -> list[list[sg.Element]]:
-        set_lines: list[str] = []
+    def _set_rows() -> list[list[str]]:
+        rows: list[list[str]] = []
         raw_sets = card.get("sets")
         if isinstance(raw_sets, dict):
             for code, set_info in sorted(raw_sets.items()):
                 if isinstance(set_info, dict):
                     display_code = str(set_info.get("display_code", code))
-                    price = get_cardmarket_price_by_card_id(card_id, display_code)
-                    set_lines.append(
-                        f"{display_code} x{set_info.get('quantity', 0)}. CM price {price['price']} EUR"
+                    price_text = "N/A"
+                    try:
+                        price = get_cardmarket_price_by_card_id(card_id, display_code)
+                        price_text = f"{price['price']} {price['currency']}"
+                    except (RuntimeError, ValueError):
+                        pass
+                    rows.append(
+                        [
+                            display_code,
+                            str(_safe_int(set_info.get("quantity"), 0)),
+                            price_text,
+                        ]
                     )
-        sets_text = "\n".join(set_lines) if set_lines else "No set breakdown"
+        return rows
+
+    def _detail_copy_layout() -> list[list[sg.Element]]:
+        set_rows = _set_rows()
 
         description_text = str(card.get("description", "")).strip()
         if description_text == "":
@@ -186,15 +204,25 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
             [sg.Text(_types_text(card))],
             [sg.Text(_card_stats_text(card))],
             [sg.Text(f"Total Quantity: {card.get('total_quantity', 0)}")],
-            [sg.Text("Set copies:")],
+            [sg.Text("Set copies (select one print to delete):")],
             [
-                sg.Multiline(
-                    default_text=sets_text,
-                    size=(48, 5),
-                    disabled=True,
-                    no_scrollbar=False,
+                sg.Table(
+                    values=set_rows,
+                    headings=["Print", "Qty", "CM Price"],
+                    auto_size_columns=False,
+                    col_widths=[20, 7, 14],
+                    key=detail_sets_key,
+                    enable_events=True,
+                    justification="left",
+                    select_mode=sg.TABLE_SELECT_MODE_BROWSE,
+                    num_rows=5,
                 )
             ],
+            [
+                sg.Button("Remove 1 Copy", key=remove_one_key),
+                sg.Button("Remove Selected Print", key=remove_set_key),
+            ],
+            [sg.Button("Delete Card", key=delete_card_key)],
             [sg.Text("Description:")],
             [
                 sg.Multiline(
@@ -228,11 +256,50 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
         f"Card Details - {card_id}", layout, modal=True, finalize=True
     )
 
+    changed = False
     while True:
-        event, _ = detail_window.read()
+        event, detail_values = detail_window.read()
         if event in (sg.WIN_CLOSED, "Close"):
             break
+        if event in (remove_one_key, remove_set_key):
+            row_index = _selected_table_index(detail_values, detail_sets_key)
+            set_rows = _set_rows()
+            if (
+                row_index is None
+                or row_index < 0
+                or row_index >= len(set_rows)
+            ):
+                sg.popup_error("Select a print from the set list first.")
+                continue
+            selected_set_code = str(set_rows[row_index][0])
+            try:
+                remove_card_from_collection(
+                    card_id,
+                    set_code=selected_set_code,
+                    quantity=1,
+                    remove_all=(event == remove_set_key),
+                )
+                changed = True
+                break
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+                continue
+        if event == delete_card_key:
+            confirmation = sg.popup_yes_no(
+                "Delete this card and all its print variants from your stock?",
+                title="Confirm Delete",
+            )
+            if confirmation != "Yes":
+                continue
+            try:
+                remove_card_from_collection(card_id, remove_all=True)
+                changed = True
+                break
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+                continue
     detail_window.close()
+    return changed
 
 
 def _selected_table_index(values: dict[str, object], key: str) -> int | None:
@@ -346,7 +413,9 @@ def main() -> None:
             if row_index is None or row_index < 0 or row_index >= len(stock_cards):
                 continue
             try:
-                _open_stock_detail_popup(stock_cards[row_index])
+                changed = _open_stock_detail_popup(stock_cards[row_index])
+                if changed:
+                    stock_cards = _refresh_stock(window)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
 
