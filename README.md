@@ -48,6 +48,12 @@ Show your saved collection:
 python main.py list
 ```
 
+Get Cardmarket price by card ID:
+
+```bash
+python main.py price 37818794 --set-code RA02-EN021
+```
+
 Remove one copy (or use `--all` to remove the card entirely):
 
 ```bash
@@ -73,3 +79,4 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `add_card_to_collection(set_identifier, card_id, quantity)`
 - `list_collection()`
 - `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`
+- `get_cardmarket_price_by_card_id(card_id, set_code=None)` from `pricing.py`

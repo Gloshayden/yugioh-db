@@ -9,6 +9,7 @@ from core import (
     resolve_cards_for_identifier,
     search_set_codes,
 )
+from pricing import get_cardmarket_price_by_card_id
 
 
 def positive_int(value: str) -> int:
@@ -102,6 +103,15 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_price(args: argparse.Namespace) -> int:
+    result = get_cardmarket_price_by_card_id(args.card_id, args.set_code)
+    print(
+        f"{result['name']} ({result['set_code']}): "
+        f"{result['price']} {result['currency']} [{result['source']}]"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Search Yu-Gi-Oh cards by set code and track your collection.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -134,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
     remove_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to remove.")
     remove_parser.add_argument("--all", action="store_true", help="Remove this card entirely.")
     remove_parser.set_defaults(func=cmd_remove)
+
+    price_parser = subparsers.add_parser("price", help="Get Cardmarket price by card ID.")
+    price_parser.add_argument("card_id", type=int, help="Card ID.")
+    price_parser.add_argument("--set-code", help="Optional set/print code (for example: RA02-EN021).")
+    price_parser.set_defaults(func=cmd_price)
 
     return parser
 

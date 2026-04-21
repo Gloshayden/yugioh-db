@@ -64,6 +64,19 @@ def get_cards_for_set_name(set_name: str) -> list[dict[str, object]]:
     return [item for item in cards if isinstance(item, dict)]
 
 
+def get_card_by_id(card_id: int) -> dict[str, object]:
+    data = fetch_json(f"{API_BASE}/cardinfo.php?id={int(card_id)}")
+    if not isinstance(data, dict):
+        raise RuntimeError("Unexpected card lookup response format.")
+    cards = data.get("data")
+    if not isinstance(cards, list) or not cards:
+        raise ValueError(f"Card id '{card_id}' was not found.")
+    card = cards[0]
+    if not isinstance(card, dict):
+        raise RuntimeError("Unexpected card lookup item format.")
+    return card
+
+
 def find_cards_by_print_code(
     cards: list[dict[str, object]], print_code: str
 ) -> list[dict[str, object]]:
