@@ -149,6 +149,45 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
 
 
 def _open_stock_detail_popup(card: dict[str, object]) -> None:
+    def _detail_copy_layout() -> list[list[sg.Element]]:
+        set_lines: list[str] = []
+        raw_sets = card.get("sets")
+        if isinstance(raw_sets, dict):
+            for code, set_info in sorted(raw_sets.items()):
+                if isinstance(set_info, dict):
+                    set_lines.append(f"{code} x{set_info.get('quantity', 0)}")
+        sets_text = "\n".join(set_lines) if set_lines else "No set breakdown"
+
+        description_text = str(card.get("description", "")).strip()
+        if description_text == "":
+            description_text = "No description available."
+
+        return [
+            [sg.Text(str(card.get("name", "Unknown Card")), font=("Any", 14, "bold"))],
+            [sg.Text(_types_text(card))],
+            [sg.Text(_card_stats_text(card))],
+            [sg.Text(f"Total Quantity: {card.get('total_quantity', 0)}")],
+            [sg.Text("Set copies:")],
+            [
+                sg.Multiline(
+                    default_text=sets_text,
+                    size=(48, 5),
+                    disabled=True,
+                    no_scrollbar=False,
+                )
+            ],
+            [sg.Text("Description:")],
+            [
+                sg.Multiline(
+                    default_text=description_text,
+                    size=(48, 9),
+                    disabled=True,
+                    no_scrollbar=False,
+                )
+            ],
+            [sg.Button("Close")],
+        ]
+
     card_id = _safe_int(card.get("card_id"), -1)
     if card_id < 0:
         raise ValueError("Selected card does not have a valid card id.")
@@ -156,26 +195,11 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
     image_element: sg.Element
     try:
         image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
-        image_element = sg.Image(filename=str(image_path), pad=((0, 12), (0, 0)))
+        image_element = sg.Image(filename=str(image_path), pad=((0, 14), (0, 0)))
     except (RuntimeError, ValueError):
-        image_element = sg.Text("Image unavailable", size=(20, 12), justification="center")
+        image_element = sg.Text("Image unavailable", size=(22, 20), justification="center")
 
-    details_layout = [
-        [sg.Text(str(card.get("name", "Unknown Card")), font=("Any", 14, "bold"))],
-        [sg.Text(_types_text(card))],
-        [sg.Text(_card_stats_text(card))],
-        [
-            sg.Multiline(
-                default_text=str(card.get("description", "")),
-                size=(66, 14),
-                disabled=True,
-                no_scrollbar=False,
-            )
-        ],
-        [sg.Button("Close")],
-    ]
-
-    layout = [[image_element, sg.Column(details_layout, pad=(0, 0))]]
+    layout = [[image_element, sg.Column(_detail_copy_layout(), pad=(0, 0), vertical_alignment="top")]]
     detail_window = sg.Window(f"Card Details - {card_id}", layout, modal=True, finalize=True)
 
     while True:
