@@ -61,6 +61,7 @@ DECK_REMOVE_ONE_BUTTON_KEY = "-DECK-REMOVE-ONE-"
 DECK_REMOVE_ALL_BUTTON_KEY = "-DECK-REMOVE-ALL-"
 DECK_CARDS_TABLE_KEY = "-DECK-CARDS-"
 DECK_CARDS_DOUBLE_CLICK_EVENT = f"{DECK_CARDS_TABLE_KEY}+DOUBLE-CLICK+"
+DECK_SECTION_TOTALS_KEY = "-DECK-SECTION-TOTALS-"
 IMAGE_CACHE_DIR = Path("cache/images")
 
 
@@ -220,6 +221,7 @@ def _build_deck_section() -> list[list[sg.Element]]:
                 pad=((10, 0), (0, 0)),
             ),
         ],
+        [sg.Text("Main: 0   Extra: 0   Side: 0", key=DECK_SECTION_TOTALS_KEY)],
     ]
 
 
@@ -373,6 +375,22 @@ def _deck_card_rows(
     return rows
 
 
+def _deck_section_totals(deck: dict[str, object]) -> tuple[int, int, int]:
+    cards = deck.get("cards")
+    if not isinstance(cards, dict):
+        return 0, 0, 0
+
+    totals = {"main": 0, "extra": 0, "side": 0}
+    for card in cards.values():
+        if not isinstance(card, dict):
+            continue
+        section = str(card.get("section", "main")).strip().lower()
+        if section not in totals:
+            continue
+        totals[section] += _safe_int(card.get("quantity"), 0)
+    return totals["main"], totals["extra"], totals["side"]
+
+
 def _select_deck_row(window: sg.Window, deck_row_index: int) -> None:
     if deck_row_index < 0:
         return
@@ -408,9 +426,14 @@ def _refresh_selected_deck(
 ) -> dict[str, object] | None:
     if deck_name is None or deck_name.strip() == "":
         window[DECK_CARDS_TABLE_KEY].update(values=[])
+        window[DECK_SECTION_TOTALS_KEY].update("Main: 0   Extra: 0   Side: 0")
         return None
     deck = get_deck(deck_name)
     window[DECK_CARDS_TABLE_KEY].update(values=_deck_card_rows(deck, section_filter))
+    main_total, extra_total, side_total = _deck_section_totals(deck)
+    window[DECK_SECTION_TOTALS_KEY].update(
+        f"Main: {main_total}   Extra: {extra_total}   Side: {side_total}"
+    )
     return deck
 
 
