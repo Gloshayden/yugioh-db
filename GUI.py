@@ -55,6 +55,7 @@ DECK_EXPORT_YDK_BUTTON_KEY = "-DECK-EXPORT-YDK-"
 DECK_CARD_INPUT_KEY = "-DECK-CARD-"
 DECK_QTY_INPUT_KEY = "-DECK-QTY-"
 DECK_SECTION_INPUT_KEY = "-DECK-SECTION-"
+DECK_CARD_FILTER_KEY = "-DECK-CARD-FILTER-"
 DECK_ADD_CARD_BUTTON_KEY = "-DECK-ADD-CARD-"
 DECK_REMOVE_ONE_BUTTON_KEY = "-DECK-REMOVE-ONE-"
 DECK_REMOVE_ALL_BUTTON_KEY = "-DECK-REMOVE-ALL-"
@@ -202,6 +203,16 @@ def _build_deck_section() -> list[list[sg.Element]]:
             ),
             sg.Column(
                 [
+                    [sg.Text("Card Filter:")],
+                    [
+                        sg.Combo(
+                            values=["all", "main", "extra", "side"],
+                            default_value="all",
+                            readonly=True,
+                            key=DECK_CARD_FILTER_KEY,
+                            size=(10, 1),
+                        )
+                    ],
                     [sg.Button("Remove 1", key=DECK_REMOVE_ONE_BUTTON_KEY)],
                     [sg.Button("Remove Card", key=DECK_REMOVE_ALL_BUTTON_KEY)],
                 ],
@@ -329,20 +340,32 @@ def _deck_rows(decks: list[dict[str, object]]) -> list[list[str]]:
     return rows
 
 
-def _deck_card_rows(deck: dict[str, object]) -> list[list[str]]:
+def _deck_card_rows(
+    deck: dict[str, object], section_filter: str = "all"
+) -> list[list[str]]:
     cards = deck.get("cards")
     if not isinstance(cards, dict):
         return []
+    selected_filter = section_filter.strip().lower()
     rows: list[list[str]] = []
-    for card in sorted(cards.values(), key=lambda item: str(item.get("name", "")).casefold()):
+    for card in sorted(
+        cards.values(),
+        key=lambda item: (
+            str(item.get("section", "main")),
+            str(item.get("name", "")).casefold(),
+        ),
+    ):
         if not isinstance(card, dict):
+            continue
+        section = str(card.get("section", "main")).strip().lower()
+        if selected_filter != "all" and section != selected_filter:
             continue
         rows.append(
             [
                 str(card.get("card_id", "")),
                 str(card.get("name", "Unknown Card")),
                 str(card.get("type", "Unknown Type")),
-                str(card.get("section", "main")),
+                section,
                 str(_safe_int(card.get("quantity"), 0)),
             ]
         )
@@ -379,12 +402,14 @@ def _refresh_decks(
     return decks
 
 
-def _refresh_selected_deck(window: sg.Window, deck_name: str | None) -> dict[str, object] | None:
+def _refresh_selected_deck(
+    window: sg.Window, deck_name: str | None, section_filter: str = "all"
+) -> dict[str, object] | None:
     if deck_name is None or deck_name.strip() == "":
         window[DECK_CARDS_TABLE_KEY].update(values=[])
         return None
     deck = get_deck(deck_name)
-    window[DECK_CARDS_TABLE_KEY].update(values=_deck_card_rows(deck))
+    window[DECK_CARDS_TABLE_KEY].update(values=_deck_card_rows(deck, section_filter))
     return deck
 
 
@@ -402,6 +427,13 @@ def _active_deck_name(
     if from_table is not None:
         return from_table
     return selected_deck_name
+
+
+def _active_deck_filter(values: dict[str, object], selected_filter: str) -> str:
+    raw_filter = str(values.get(DECK_CARD_FILTER_KEY, selected_filter)).strip().lower()
+    if raw_filter in {"all", "main", "extra", "side"}:
+        return raw_filter
+    return selected_filter
 
 
 def _open_stock_detail_popup(card: dict[str, object]) -> bool:
@@ -613,6 +645,7 @@ def _open_deck_card_detail_popup(deck_name: str, deck_card: dict[str, object]) -
                     card_id,
                     quantity=1,
                     remove_all=(event == remove_all_key),
+                    section=str(deck_card.get("section", "main")),
                 )
                 changed = True
                 break
@@ -672,6 +705,7 @@ def main() -> None:
     stock_cards = _refresh_stock(window)
     decks = _refresh_decks(window)
     selected_deck_name: str | None = None
+    selected_deck_filter = "all"
 
     while True:
         event, values = window.read()
@@ -764,13 +798,19 @@ def main() -> None:
 
         if event == DECK_REFRESH_BUTTON_KEY:
             selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
+            selected_deck_filter = _active_deck_filter(values, selected_deck_filter)
             decks = _refresh_decks(window, selected_deck_name)
-            _refresh_selected_deck(window, selected_deck_name)
+            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             continue
 
         if event == DECK_LIST_KEY:
             selected_deck_name = _selected_deck_name(values, decks)
-            _refresh_selected_deck(window, selected_deck_name)
+            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
+            continue
+
+        if event == DECK_CARD_FILTER_KEY:
+            selected_deck_filter = _active_deck_filter(values, selected_deck_filter)
+            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             continue
 
         if event == DECK_CREATE_BUTTON_KEY:
@@ -784,7 +824,7 @@ def main() -> None:
                 create_deck(deck_name, status=status, notes=notes)
                 selected_deck_name = deck_name
                 decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 sg.popup_no_titlebar(
                     "Deck created.", auto_close=True, auto_close_duration=1.2
                 )
@@ -801,7 +841,7 @@ def main() -> None:
             try:
                 set_deck_status(selected_deck_name, status)
                 decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
@@ -831,7 +871,7 @@ def main() -> None:
                 )
                 selected_deck_name = target_deck_name
                 decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 window[DECK_NAME_INPUT_KEY].update(value=selected_deck_name)
                 sg.popup_no_titlebar(
                     "Deck imported from YDK.", auto_close=True, auto_close_duration=1.2
@@ -878,7 +918,7 @@ def main() -> None:
                 delete_deck(selected_deck_name)
                 decks = _refresh_decks(window)
                 selected_deck_name = None
-                _refresh_selected_deck(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
@@ -902,7 +942,7 @@ def main() -> None:
                 add_card_to_deck(
                     selected_deck_name, card_identifier, quantity=qty, section=section_arg
                 )
-                _refresh_selected_deck(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 decks = _refresh_decks(window, selected_deck_name)
                 sg.popup_no_titlebar(
                     "Card added to deck.", auto_close=True, auto_close_duration=1.2
@@ -916,24 +956,26 @@ def main() -> None:
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
                 continue
-            deck = _refresh_selected_deck(window, selected_deck_name)
+            deck = _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             if deck is None:
                 sg.popup_error("Select a deck first.")
                 continue
             row_index = _selected_table_index(values, DECK_CARDS_TABLE_KEY)
-            card_rows = _deck_card_rows(deck)
+            card_rows = _deck_card_rows(deck, selected_deck_filter)
             if row_index is None or row_index < 0 or row_index >= len(card_rows):
                 sg.popup_error("Select a deck card first.")
                 continue
             card_id = card_rows[row_index][0]
+            section = card_rows[row_index][3]
             try:
                 remove_card_from_deck(
                     selected_deck_name,
                     card_id,
                     quantity=1,
                     remove_all=(event == DECK_REMOVE_ALL_BUTTON_KEY),
+                    section=section,
                 )
-                _refresh_selected_deck(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 decks = _refresh_decks(window, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
@@ -944,23 +986,33 @@ def main() -> None:
             if selected_deck_name is None:
                 continue
             deck = get_deck(selected_deck_name)
-            card_rows = _deck_card_rows(deck)
+            card_rows = _deck_card_rows(deck, selected_deck_filter)
             row_index = _selected_deck_card_index(window, values)
             if row_index is None or row_index < 0 or row_index >= len(card_rows):
                 continue
             card_id = _safe_int(card_rows[row_index][0], -1)
+            section = str(card_rows[row_index][3]).strip().lower()
             if card_id < 0:
                 continue
             cards_map = deck.get("cards")
             if not isinstance(cards_map, dict):
                 continue
-            deck_card = cards_map.get(str(card_id))
-            if not isinstance(deck_card, dict):
+            deck_card = next(
+                (
+                    item
+                    for item in cards_map.values()
+                    if isinstance(item, dict)
+                    and _safe_int(item.get("card_id"), -1) == card_id
+                    and str(item.get("section", "main")).strip().lower() == section
+                ),
+                None,
+            )
+            if deck_card is None:
                 continue
             try:
                 changed = _open_deck_card_detail_popup(selected_deck_name, deck_card)
                 if changed:
-                    _refresh_selected_deck(window, selected_deck_name)
+                    _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                     decks = _refresh_decks(window, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))

@@ -37,7 +37,7 @@ GUI sections:
 - **Search tab**: enter set code/print code/card name, search cards, select a row, add quantity to stock.
 - **My Stock tab**: shows card name + total quantity; double-click a row to open details.
 - **Stock details popup**: image on the left, with copy/details on the right (name, full description, types, ATK, DEF, set copies, total quantity) plus delete actions (`Remove 1 Copy`, `Remove Selected Print`, `Delete Card`).
-- **Deck Builder tab**: create decks, mark them as `current`/`future`, add/remove cards by ID or name, track deck totals, and import/export `.ydk` files.
+- **Deck Builder tab**: create decks, mark them as `current`/`future`, add/remove cards by ID or name, filter deck cards by section (`all/main/extra/side`), and import/export `.ydk` files.
 
 Find a set code (if you only know part of the set name):
 
@@ -130,6 +130,7 @@ python CLI.py deck-show "Blue-Eyes Current"
 python CLI.py deck-add "Blue-Eyes Current" "Blue-Eyes White Dragon" --qty 3
 python CLI.py deck-add "Blue-Eyes Current" "Blue-Eyes Tyrant Dragon" --section extra --qty 1
 python CLI.py deck-remove "Blue-Eyes Current" "Blue-Eyes White Dragon" --qty 1
+python CLI.py deck-remove "Blue-Eyes Current" "Blue-Eyes White Dragon" --section side --all
 python CLI.py deck-status "Branded Next" current
 python CLI.py deck-import-ydk "Sky Striker" "/path/to/sky_striker.ydk" --status future --overwrite
 python CLI.py deck-export-ydk "Blue-Eyes Current" "/path/to/blue_eyes_current.ydk"
