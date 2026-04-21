@@ -216,11 +216,26 @@ def _selected_table_index(values: dict[str, object], key: str) -> int | None:
     return _safe_int(selected[0], -1)
 
 
+def _selected_stock_index(window: sg.Window, values: dict[str, object]) -> int | None:
+    row_index = _selected_table_index(values, STOCK_TABLE_KEY)
+    if row_index is not None and row_index >= 0:
+        return row_index
+
+    try:
+        widget = window[STOCK_TABLE_KEY].Widget
+        selected_items = widget.selection()
+        if selected_items:
+            return _safe_int(widget.index(selected_items[0]), -1)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return None
+
+
 def main() -> None:
     sg.theme("DarkAmber")
 
     window = sg.Window("Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True)
-    window[STOCK_TABLE_KEY].Widget.bind("<Double-1>", "+DOUBLE-CLICK+")
+    window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
 
     search_cards: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
@@ -279,7 +294,7 @@ def main() -> None:
             continue
 
         if event == STOCK_DOUBLE_CLICK_EVENT:
-            row_index = _selected_table_index(values, STOCK_TABLE_KEY)
+            row_index = _selected_stock_index(window, values)
             if row_index is None or row_index < 0 or row_index >= len(stock_cards):
                 continue
             try:
