@@ -59,6 +59,7 @@ DECK_ADD_CARD_BUTTON_KEY = "-DECK-ADD-CARD-"
 DECK_REMOVE_ONE_BUTTON_KEY = "-DECK-REMOVE-ONE-"
 DECK_REMOVE_ALL_BUTTON_KEY = "-DECK-REMOVE-ALL-"
 DECK_CARDS_TABLE_KEY = "-DECK-CARDS-"
+DECK_CARDS_DOUBLE_CLICK_EVENT = f"{DECK_CARDS_TABLE_KEY}+DOUBLE-CLICK+"
 IMAGE_CACHE_DIR = Path("cache/images")
 
 
@@ -552,6 +553,77 @@ def _open_stock_detail_popup(card: dict[str, object]) -> bool:
     return changed
 
 
+def _open_deck_card_detail_popup(deck_name: str, deck_card: dict[str, object]) -> bool:
+    card_id = _safe_int(deck_card.get("card_id"), -1)
+    if card_id < 0:
+        raise ValueError("Selected deck card does not have a valid card id.")
+
+    remove_one_key = "-DECK-DETAIL-REMOVE-ONE-"
+    remove_all_key = "-DECK-DETAIL-REMOVE-ALL-"
+
+    def _image_data_for_gui(image_path: Path) -> bytes:
+        with Image.open(image_path) as image:
+            rgb_image = image.convert("RGB")
+            buffer = io.BytesIO()
+            rgb_image.save(buffer, format="PNG")
+            return buffer.getvalue()
+
+    image_element: sg.Element
+    try:
+        image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
+        image_element = sg.Image(
+            data=_image_data_for_gui(image_path), pad=((0, 14), (0, 0))
+        )
+    except RuntimeError, ValueError, OSError:
+        image_element = sg.Text(
+            "Image unavailable", size=(22, 20), justification="center"
+        )
+
+    layout = [
+        [
+            image_element,
+            sg.Column(
+                [
+                    [sg.Text(str(deck_card.get("name", "Unknown Card")), font=("Any", 14, "bold"))],
+                    [sg.Text(str(deck_card.get("type", "Unknown Type")))],
+                    [sg.Text(f"Card ID: {card_id}")],
+                    [sg.Text(f"Section: {deck_card.get('section', 'main')}")],
+                    [sg.Text(f"Quantity in Deck: {deck_card.get('quantity', 0)}")],
+                    [sg.Button("Remove 1", key=remove_one_key), sg.Button("Remove Card", key=remove_all_key)],
+                    [sg.Button("Close")],
+                ],
+                pad=(0, 0),
+                vertical_alignment="top",
+            ),
+        ]
+    ]
+
+    detail_window = sg.Window(
+        f"Deck Card - {card_id}", layout, modal=True, finalize=True
+    )
+    changed = False
+    while True:
+        event, _ = detail_window.read()
+        if event in (sg.WIN_CLOSED, "Close"):
+            break
+        if event in (remove_one_key, remove_all_key):
+            try:
+                remove_card_from_deck(
+                    deck_name,
+                    card_id,
+                    quantity=1,
+                    remove_all=(event == remove_all_key),
+                )
+                changed = True
+                break
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+                continue
+
+    detail_window.close()
+    return changed
+
+
 def _selected_table_index(values: dict[str, object], key: str) -> int | None:
     selected = values.get(key)
     if not isinstance(selected, list) or not selected:
@@ -574,11 +646,27 @@ def _selected_stock_index(window: sg.Window, values: dict[str, object]) -> int |
     return None
 
 
+def _selected_deck_card_index(window: sg.Window, values: dict[str, object]) -> int | None:
+    row_index = _selected_table_index(values, DECK_CARDS_TABLE_KEY)
+    if row_index is not None and row_index >= 0:
+        return row_index
+
+    try:
+        widget = window[DECK_CARDS_TABLE_KEY].Widget
+        selected_items = widget.selection()
+        if selected_items:
+            return _safe_int(widget.index(selected_items[0]), -1)
+    except AttributeError, TypeError, ValueError:
+        return None
+    return None
+
+
 def main() -> None:
     sg.theme("DarkAmber")
 
     window = sg.Window("Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True)
     window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+    window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
 
     search_entries: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
@@ -847,6 +935,33 @@ def main() -> None:
                 )
                 _refresh_selected_deck(window, selected_deck_name)
                 decks = _refresh_decks(window, selected_deck_name)
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
+        if event == DECK_CARDS_DOUBLE_CLICK_EVENT:
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
+            if selected_deck_name is None:
+                continue
+            deck = get_deck(selected_deck_name)
+            card_rows = _deck_card_rows(deck)
+            row_index = _selected_deck_card_index(window, values)
+            if row_index is None or row_index < 0 or row_index >= len(card_rows):
+                continue
+            card_id = _safe_int(card_rows[row_index][0], -1)
+            if card_id < 0:
+                continue
+            cards_map = deck.get("cards")
+            if not isinstance(cards_map, dict):
+                continue
+            deck_card = cards_map.get(str(card_id))
+            if not isinstance(deck_card, dict):
+                continue
+            try:
+                changed = _open_deck_card_detail_popup(selected_deck_name, deck_card)
+                if changed:
+                    _refresh_selected_deck(window, selected_deck_name)
+                    decks = _refresh_decks(window, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
