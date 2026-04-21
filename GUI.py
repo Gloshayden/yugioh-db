@@ -20,6 +20,9 @@ ADD_BUTTON_KEY = "-ADD-BTN-"
 STOCK_TABLE_KEY = "-STOCK-TABLE-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
+MAIN_TABS_KEY = "-MAIN-TABS-"
+SEARCH_TAB_KEY = "-SEARCH-TAB-"
+STOCK_TAB_KEY = "-STOCK-TAB-"
 IMAGE_CACHE_DIR = Path("cache/images")
 
 
@@ -92,9 +95,17 @@ def _build_stock_section() -> list[list[sg.Element]]:
 def _layout() -> list[list[sg.Element]]:
     return [
         [
-            sg.Frame("Search", _build_search_section(), pad=(8, 8)),
-            sg.VSeparator(),
-            sg.Frame("My Stock", _build_stock_section(), pad=(8, 8)),
+            sg.TabGroup(
+                [
+                    [
+                        sg.Tab("Search", _build_search_section(), key=SEARCH_TAB_KEY),
+                        sg.Tab("My Stock", _build_stock_section(), key=STOCK_TAB_KEY),
+                    ]
+                ],
+                key=MAIN_TABS_KEY,
+                expand_x=True,
+                expand_y=True,
+            )
         ]
     ]
 
