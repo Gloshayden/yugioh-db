@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import FreeSimpleGUI as sg
 
 from core import (
@@ -18,6 +20,7 @@ ADD_BUTTON_KEY = "-ADD-BTN-"
 STOCK_TABLE_KEY = "-STOCK-TABLE-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
+IMAGE_CACHE_DIR = Path("cache/images")
 
 
 def _card_stats_text(card: dict[str, object]) -> str:
@@ -141,7 +144,7 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
 
     image_element: sg.Element
     try:
-        image_path = cache_low_res_card_image(card_id)
+        image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
         image_element = sg.Image(filename=str(image_path), pad=((0, 12), (0, 0)))
     except (RuntimeError, ValueError):
         image_element = sg.Text("Image unavailable", size=(20, 12), justification="center")
