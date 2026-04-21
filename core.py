@@ -576,6 +576,7 @@ def _get_matching_print_variants(
 
     normalized_selected_code = normalize_set_code(selected_set_code)
     normalized_selected_name = selected_set_name.strip().lower()
+    selected_is_print_code = "-" in normalized_selected_code
 
     variants: list[dict[str, object]] = []
     seen: set[tuple[str, str | None]] = set()
@@ -586,13 +587,17 @@ def _get_matching_print_variants(
         if print_code == "":
             continue
 
-        item_set_name = str(item.get("set_name", "")).strip().lower()
-        code_matches = (
-            print_code == normalized_selected_code
-            or print_code.startswith(f"{normalized_selected_code}-")
-        )
-        if not code_matches and item_set_name != normalized_selected_name:
-            continue
+        if selected_is_print_code:
+            if print_code != normalized_selected_code:
+                continue
+        else:
+            item_set_name = str(item.get("set_name", "")).strip().lower()
+            code_matches = (
+                print_code == normalized_selected_code
+                or print_code.startswith(f"{normalized_selected_code}-")
+            )
+            if not code_matches and item_set_name != normalized_selected_name:
+                continue
 
         item_rarity_code = normalize_rarity_code(item.get("set_rarity_code"))
         dedupe_key = (print_code, item_rarity_code)
