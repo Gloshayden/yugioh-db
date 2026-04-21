@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
-
+from pricing import get_cardmarket_price_by_card_id
 import FreeSimpleGUI as sg
 from PIL import Image
 
@@ -115,7 +115,7 @@ def _layout() -> list[list[sg.Element]]:
 def _safe_int(value: object, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -151,6 +151,10 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
 
 
 def _open_stock_detail_popup(card: dict[str, object]) -> None:
+    card_id = _safe_int(card.get("card_id"), -1)
+    if card_id < 0:
+        raise ValueError("Selected card does not have a valid card id.")
+
     def _image_data_for_gui(image_path: Path) -> bytes:
         with Image.open(image_path) as image:
             rgb_image = image.convert("RGB")
@@ -164,7 +168,10 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
         if isinstance(raw_sets, dict):
             for code, set_info in sorted(raw_sets.items()):
                 if isinstance(set_info, dict):
-                    set_lines.append(f"{code} x{set_info.get('quantity', 0)}")
+                    price = get_cardmarket_price_by_card_id(card_id, code)
+                    set_lines.append(
+                        f"{code} x{set_info.get('quantity', 0)}. CM price {price['price']} EUR"
+                    )
         sets_text = "\n".join(set_lines) if set_lines else "No set breakdown"
 
         description_text = str(card.get("description", "")).strip()
@@ -197,19 +204,26 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
             [sg.Button("Close")],
         ]
 
-    card_id = _safe_int(card.get("card_id"), -1)
-    if card_id < 0:
-        raise ValueError("Selected card does not have a valid card id.")
-
     image_element: sg.Element
     try:
         image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
-        image_element = sg.Image(data=_image_data_for_gui(image_path), pad=((0, 14), (0, 0)))
-    except (RuntimeError, ValueError, OSError):
-        image_element = sg.Text("Image unavailable", size=(22, 20), justification="center")
+        image_element = sg.Image(
+            data=_image_data_for_gui(image_path), pad=((0, 14), (0, 0))
+        )
+    except RuntimeError, ValueError, OSError:
+        image_element = sg.Text(
+            "Image unavailable", size=(22, 20), justification="center"
+        )
 
-    layout = [[image_element, sg.Column(_detail_copy_layout(), pad=(0, 0), vertical_alignment="top")]]
-    detail_window = sg.Window(f"Card Details - {card_id}", layout, modal=True, finalize=True)
+    layout = [
+        [
+            image_element,
+            sg.Column(_detail_copy_layout(), pad=(0, 0), vertical_alignment="top"),
+        ]
+    ]
+    detail_window = sg.Window(
+        f"Card Details - {card_id}", layout, modal=True, finalize=True
+    )
 
     while True:
         event, _ = detail_window.read()
@@ -235,7 +249,7 @@ def _selected_stock_index(window: sg.Window, values: dict[str, object]) -> int |
         selected_items = widget.selection()
         if selected_items:
             return _safe_int(widget.index(selected_items[0]), -1)
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         return None
     return None
 
@@ -258,7 +272,9 @@ def main() -> None:
         if event == SEARCH_BUTTON_KEY:
             set_identifier = str(values.get(SEARCH_INPUT_KEY, "")).strip()
             if not set_identifier:
-                sg.popup_error("Enter a set code or print code (for example: RA02-EN021).")
+                sg.popup_error(
+                    "Enter a set code or print code (for example: RA02-EN021)."
+                )
                 continue
             try:
                 _, _, cards = resolve_cards_for_identifier(set_identifier)
@@ -293,7 +309,9 @@ def main() -> None:
             try:
                 add_card_to_collection(set_identifier, card_id, qty)
                 stock_cards = _refresh_stock(window)
-                sg.popup_no_titlebar("Card added to stock.", auto_close=True, auto_close_duration=1.2)
+                sg.popup_no_titlebar(
+                    "Card added to stock.", auto_close=True, auto_close_duration=1.2
+                )
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
