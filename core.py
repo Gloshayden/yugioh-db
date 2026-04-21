@@ -755,6 +755,22 @@ def _infer_deck_section(card_type: str) -> str:
     return "main"
 
 
+def _deck_card_key(card_id: int, section: str) -> str:
+    return f"{_normalize_deck_section(section)}::{int(card_id)}"
+
+
+def _parse_deck_card_key(raw_key: str) -> tuple[str | None, int]:
+    key = str(raw_key).strip()
+    if "::" in key:
+        section_text, _, card_text = key.partition("::")
+        card_id = _as_int(card_text, -1)
+        if card_id >= 0:
+            section = section_text.strip().lower()
+            if section in {"main", "extra", "side"}:
+                return section, card_id
+    return None, _as_int(key, -1)
+
+
 def _resolve_any_card(card_identifier: str | int) -> dict[str, object]:
     if isinstance(card_identifier, int):
         return get_card_by_id(card_identifier)
@@ -782,26 +798,28 @@ def _recompute_deck_totals(deck: dict[str, object]) -> None:
 
     normalized_cards: dict[str, dict[str, object]] = {}
     total_cards = 0
-    unique_cards = 0
+    unique_card_ids: set[int] = set()
     for key, raw_card in raw_cards.items():
         if not isinstance(raw_card, dict):
             continue
-        card_id = _as_int(raw_card.get("card_id", key), -1)
+        key_section, key_card_id = _parse_deck_card_key(str(key))
+        card_id = _as_int(raw_card.get("card_id", key_card_id), -1)
         if card_id < 0:
             continue
         quantity = _as_int(raw_card.get("quantity"), 0)
         if quantity <= 0:
             continue
-        card_key = str(card_id)
+        card_type = str(raw_card.get("type", "Unknown Type"))
+        section_raw = raw_card.get("section", key_section)
+        section = str(section_raw if section_raw is not None else "").strip().lower()
+        if section not in {"main", "extra", "side"}:
+            section = _infer_deck_section(card_type)
+        card_key = _deck_card_key(card_id, section)
         if card_key in normalized_cards:
             normalized_cards[card_key]["quantity"] = (
                 _as_int(normalized_cards[card_key]["quantity"], 0) + quantity
             )
         else:
-            card_type = str(raw_card.get("type", "Unknown Type"))
-            section = str(raw_card.get("section", "")).strip().lower()
-            if section not in {"main", "extra", "side"}:
-                section = _infer_deck_section(card_type)
             normalized_cards[card_key] = {
                 "card_id": card_id,
                 "name": str(raw_card.get("name", "Unknown Card")),
@@ -809,12 +827,12 @@ def _recompute_deck_totals(deck: dict[str, object]) -> None:
                 "section": section,
                 "quantity": quantity,
             }
-            unique_cards += 1
+            unique_card_ids.add(card_id)
         total_cards += quantity
 
     deck["cards"] = normalized_cards
     deck["total_cards"] = total_cards
-    deck["unique_cards"] = unique_cards
+    deck["unique_cards"] = len(unique_card_ids)
 
 
 def load_decks(decks_file: Path = DEFAULT_DECKS_FILE) -> dict[str, dict[str, object]]:
@@ -935,33 +953,75 @@ def delete_deck(deck_name: str, decks_file: Path = DEFAULT_DECKS_FILE) -> None:
     save_decks(decks, decks_file)
 
 
-def _resolve_deck_card_id(deck: dict[str, object], card_identifier: str | int) -> int:
+def _resolve_deck_card_key(
+    deck: dict[str, object], card_identifier: str | int, section: str | None = None
+) -> str:
     cards = deck.get("cards")
     if not isinstance(cards, dict):
         cards = {}
+    target_section = (
+        _normalize_deck_section(section) if section is not None else None
+    )
+
+    def _card_entry_matches(entry: dict[str, object]) -> bool:
+        if target_section is None:
+            return True
+        entry_section = str(entry.get("section", "")).strip().lower()
+        return entry_section == target_section
+
     if isinstance(card_identifier, int):
-        return card_identifier
+        by_id = [
+            key_name
+            for key_name, item in cards.items()
+            if isinstance(item, dict)
+            and _as_int(item.get("card_id"), -1) == card_identifier
+            and _card_entry_matches(item)
+        ]
+        if len(by_id) == 1:
+            return by_id[0]
+        if len(by_id) > 1:
+            raise ValueError(
+                f"Card id '{card_identifier}' exists in multiple sections. Use --section to choose one."
+            )
+        raise ValueError(f"Card '{card_identifier}' is not in this deck.")
+
     raw_identifier = str(card_identifier).strip()
     if raw_identifier == "":
         raise ValueError("Card identifier cannot be empty.")
     if _is_int_text(raw_identifier):
-        return int(raw_identifier)
+        card_id = int(raw_identifier)
+        by_id = [
+            key_name
+            for key_name, item in cards.items()
+            if isinstance(item, dict)
+            and _as_int(item.get("card_id"), -1) == card_id
+            and _card_entry_matches(item)
+        ]
+        if len(by_id) == 1:
+            return by_id[0]
+        if len(by_id) > 1:
+            raise ValueError(
+                f"Card id '{card_identifier}' exists in multiple sections. Use --section to choose one."
+            )
+        raise ValueError(f"Card '{card_identifier}' is not in this deck.")
     target_name = _normalize_name(raw_identifier)
-    matches: list[int] = []
-    for item in cards.values():
-        if not isinstance(item, dict):
+    matches: list[str] = []
+    for key_name, item in cards.items():
+        if not isinstance(item, dict) or not _card_entry_matches(item):
             continue
         if _normalize_name(str(item.get("name", ""))) != target_name:
             continue
-        card_id = _as_int(item.get("card_id"), -1)
-        if card_id >= 0:
-            matches.append(card_id)
+        matches.append(key_name)
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        choices = ", ".join(str(card_id) for card_id in sorted(set(matches)))
+        choices = ", ".join(
+            f"{str(cards[key].get('name', 'Unknown'))} [{str(cards[key].get('section', 'main'))}]"
+            for key in sorted(matches)
+            if isinstance(cards.get(key), dict)
+        )
         raise ValueError(
-            f"Multiple deck cards matched '{card_identifier}'. Use card ID instead: {choices}."
+            f"Multiple deck cards matched '{card_identifier}'. Use card ID/--section instead: {choices}."
         )
     raise ValueError(f"Card '{card_identifier}' is not in this deck.")
 
@@ -997,7 +1057,7 @@ def add_card_to_deck(
     if not isinstance(cards, dict):
         cards = {}
         deck["cards"] = cards
-    card_key = str(card_id)
+    card_key = _deck_card_key(card_id, target_section)
     entry = cards.get(card_key)
     if not isinstance(entry, dict):
         entry = {**summary, "quantity": 0}
@@ -1070,12 +1130,11 @@ def import_deck_from_ydk(
             resolved_id = _as_int(summary.get("card_id"), -1)
             if resolved_id < 0:
                 continue
-            card_key = str(resolved_id)
+            card_key = _deck_card_key(resolved_id, section_name)
             entry = deck["cards"].get(card_key)
             if isinstance(entry, dict):
                 entry["quantity"] = _as_int(entry.get("quantity"), 0) + 1
-                if section_name != "main":
-                    entry["section"] = section_name
+                entry["section"] = section_name
                 deck["cards"][card_key] = entry
             else:
                 deck["cards"][card_key] = {
@@ -1139,6 +1198,7 @@ def remove_card_from_deck(
     card_identifier: str | int,
     quantity: int = 1,
     remove_all: bool = False,
+    section: str | None = None,
     decks_file: Path = DEFAULT_DECKS_FILE,
 ) -> dict[str, object]:
     normalized_name = _normalize_deck_name(deck_name)
@@ -1154,8 +1214,7 @@ def remove_card_from_deck(
     if not isinstance(cards, dict) or not cards:
         raise ValueError(f"Deck '{normalized_name}' has no cards.")
 
-    card_id = _resolve_deck_card_id(deck, card_identifier)
-    card_key = str(card_id)
+    card_key = _resolve_deck_card_key(deck, card_identifier, section=section)
     entry = cards.get(card_key)
     if not isinstance(entry, dict):
         raise ValueError(f"Card '{card_identifier}' is not in this deck.")

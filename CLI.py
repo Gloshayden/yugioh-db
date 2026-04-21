@@ -199,7 +199,13 @@ def _print_deck(deck: dict[str, object]) -> None:
     if not isinstance(cards, dict) or not cards:
         print("  (empty)")
         return
-    for card in sorted(cards.values(), key=lambda item: str(item.get("name", "")).casefold()):
+    for card in sorted(
+        cards.values(),
+        key=lambda item: (
+            str(item.get("section", "main")),
+            str(item.get("name", "")).casefold(),
+        ),
+    ):
         if not isinstance(card, dict):
             continue
         print(
@@ -253,6 +259,7 @@ def cmd_deck_remove(args: argparse.Namespace) -> int:
         args.card,
         quantity=args.qty,
         remove_all=args.all,
+        section=args.section,
     )
     print(
         f"Updated deck '{deck['name']}'. "
@@ -378,6 +385,11 @@ def build_parser() -> argparse.ArgumentParser:
     deck_remove_parser.add_argument("card", help="Card ID or exact card name.")
     deck_remove_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to remove.")
     deck_remove_parser.add_argument("--all", action="store_true", help="Remove this card from the deck.")
+    deck_remove_parser.add_argument(
+        "--section",
+        choices=["main", "extra", "side"],
+        help="Optional deck section when the same card exists in multiple sections.",
+    )
     deck_remove_parser.set_defaults(func=cmd_deck_remove)
 
     deck_status_parser = subparsers.add_parser("deck-status", help="Set deck status.")
