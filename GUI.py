@@ -332,9 +332,33 @@ def _deck_card_rows(deck: dict[str, object]) -> list[list[str]]:
     return rows
 
 
-def _refresh_decks(window: sg.Window) -> list[dict[str, object]]:
+def _select_deck_row(window: sg.Window, deck_row_index: int) -> None:
+    if deck_row_index < 0:
+        return
+    try:
+        widget = window[DECK_LIST_KEY].Widget
+        children = widget.get_children()
+        if deck_row_index >= len(children):
+            return
+        selected_item = children[deck_row_index]
+        widget.selection_set(selected_item)
+        widget.focus(selected_item)
+        widget.see(selected_item)
+    except AttributeError:
+        return
+
+
+def _refresh_decks(
+    window: sg.Window, selected_deck_name: str | None = None
+) -> list[dict[str, object]]:
     decks = list_decks()
     window[DECK_LIST_KEY].update(values=_deck_rows(decks))
+    if selected_deck_name is not None and selected_deck_name.strip() != "":
+        target_name = selected_deck_name.strip().casefold()
+        for index, deck in enumerate(decks):
+            if str(deck.get("name", "")).strip().casefold() == target_name:
+                _select_deck_row(window, index)
+                break
     return decks
 
 
@@ -352,6 +376,15 @@ def _selected_deck_name(values: dict[str, object], decks: list[dict[str, object]
     if row_index is None or row_index < 0 or row_index >= len(decks):
         return None
     return str(decks[row_index].get("name", "")).strip() or None
+
+
+def _active_deck_name(
+    values: dict[str, object], decks: list[dict[str, object]], selected_deck_name: str | None
+) -> str | None:
+    from_table = _selected_deck_name(values, decks)
+    if from_table is not None:
+        return from_table
+    return selected_deck_name
 
 
 def _open_stock_detail_popup(card: dict[str, object]) -> bool:
@@ -626,8 +659,8 @@ def main() -> None:
             continue
 
         if event == DECK_REFRESH_BUTTON_KEY:
-            decks = _refresh_decks(window)
-            selected_deck_name = _selected_deck_name(values, decks)
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
+            decks = _refresh_decks(window, selected_deck_name)
             _refresh_selected_deck(window, selected_deck_name)
             continue
 
@@ -645,8 +678,8 @@ def main() -> None:
                 continue
             try:
                 create_deck(deck_name, status=status, notes=notes)
-                decks = _refresh_decks(window)
                 selected_deck_name = deck_name
+                decks = _refresh_decks(window, selected_deck_name)
                 _refresh_selected_deck(window, selected_deck_name)
                 sg.popup_no_titlebar(
                     "Deck created.", auto_close=True, auto_close_duration=1.2
@@ -656,21 +689,21 @@ def main() -> None:
             continue
 
         if event in (DECK_SET_CURRENT_BUTTON_KEY, DECK_SET_FUTURE_BUTTON_KEY):
-            selected_deck_name = _selected_deck_name(values, decks)
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
                 continue
             status = "current" if event == DECK_SET_CURRENT_BUTTON_KEY else "future"
             try:
                 set_deck_status(selected_deck_name, status)
-                decks = _refresh_decks(window)
+                decks = _refresh_decks(window, selected_deck_name)
                 _refresh_selected_deck(window, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
 
         if event == DECK_DELETE_BUTTON_KEY:
-            selected_deck_name = _selected_deck_name(values, decks)
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
                 continue
@@ -689,7 +722,7 @@ def main() -> None:
             continue
 
         if event == DECK_ADD_CARD_BUTTON_KEY:
-            selected_deck_name = _selected_deck_name(values, decks)
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
                 continue
@@ -704,7 +737,7 @@ def main() -> None:
             try:
                 add_card_to_deck(selected_deck_name, card_identifier, quantity=qty)
                 _refresh_selected_deck(window, selected_deck_name)
-                decks = _refresh_decks(window)
+                decks = _refresh_decks(window, selected_deck_name)
                 sg.popup_no_titlebar(
                     "Card added to deck.", auto_close=True, auto_close_duration=1.2
                 )
@@ -713,7 +746,7 @@ def main() -> None:
             continue
 
         if event in (DECK_REMOVE_ONE_BUTTON_KEY, DECK_REMOVE_ALL_BUTTON_KEY):
-            selected_deck_name = _selected_deck_name(values, decks)
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
                 continue
@@ -735,7 +768,7 @@ def main() -> None:
                     remove_all=(event == DECK_REMOVE_ALL_BUTTON_KEY),
                 )
                 _refresh_selected_deck(window, selected_deck_name)
-                decks = _refresh_decks(window)
+                decks = _refresh_decks(window, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
