@@ -64,6 +64,7 @@ DECK_CARDS_TABLE_KEY = "-DECK-CARDS-"
 DECK_CARDS_DOUBLE_CLICK_EVENT = f"{DECK_CARDS_TABLE_KEY}+DOUBLE-CLICK+"
 DECK_SECTION_TOTALS_KEY = "-DECK-SECTION-TOTALS-"
 IMAGE_CACHE_DIR = Path("cache/images")
+_STOCK_PRICE_CACHE: dict[tuple[int, str], float | None] = {}
 
 
 def _card_stats_text(card: dict[str, object]) -> str:
@@ -349,15 +350,27 @@ def _stock_total_value(cards: list[dict[str, object]]) -> tuple[float, int]:
             if quantity <= 0:
                 continue
             display_code = str(set_info.get("display_code", code))
-            try:
-                price_info = get_cardmarket_price_by_card_id(card_id, display_code)
-            except (RuntimeError, ValueError):
+            cache_key = (card_id, display_code)
+            price = _STOCK_PRICE_CACHE.get(cache_key)
+            if price is None and cache_key in _STOCK_PRICE_CACHE:
                 missing_prices += 1
                 continue
-            price = _as_float(price_info.get("price"), -1.0)
-            if price < 0:
-                missing_prices += 1
-                continue
+            if price is None:
+                try:
+                    price_info = get_cardmarket_price_by_card_id(
+                        card_id, display_code, allow_scrape=False
+                    )
+                except (RuntimeError, ValueError):
+                    _STOCK_PRICE_CACHE[cache_key] = None
+                    missing_prices += 1
+                    continue
+                parsed_price = _as_float(price_info.get("price"), -1.0)
+                if parsed_price < 0:
+                    _STOCK_PRICE_CACHE[cache_key] = None
+                    missing_prices += 1
+                    continue
+                _STOCK_PRICE_CACHE[cache_key] = parsed_price
+                price = parsed_price
             total_value += price * quantity
     return total_value, missing_prices
 

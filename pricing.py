@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -12,6 +13,12 @@ from core import (
 )
 
 CARDMARKET_BASE = "https://www.cardmarket.com/en/YuGiOh/Products/Singles"
+_PRICE_CACHE: dict[tuple[int, str | None, bool], dict[str, object]] = {}
+
+
+@lru_cache(maxsize=1024)
+def _get_card_by_id_cached(card_id: int) -> dict[str, object]:
+    return get_card_by_id(card_id)
 
 
 def _slugify(text: str) -> str:
@@ -115,15 +122,25 @@ def _extract_set_price(set_entry: dict[str, object]) -> str | None:
     return price_text
 
 
-def get_cardmarket_price_by_card_id(card_id: int, set_code: str | None = None) -> dict[str, object]:
-    card = get_card_by_id(card_id)
+def get_cardmarket_price_by_card_id(
+    card_id: int,
+    set_code: str | None = None,
+    allow_scrape: bool = True,
+) -> dict[str, object]:
+    cache_set_code = None if set_code is None else set_code.strip().upper()
+    cache_key = (int(card_id), cache_set_code, allow_scrape)
+    cached = _PRICE_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+
+    card = _get_card_by_id_cached(int(card_id))
     card_name = str(card.get("name", "Unknown Card"))
     resolved_set_code, set_name = _resolve_set_info(card, set_code)
     resolved_set_entry = _resolve_set_entry(card, set_code)
     set_price = _extract_set_price(resolved_set_entry)
 
     if set_code is not None and set_price is not None:
-        return {
+        result = {
             "card_id": int(card_id),
             "name": card_name,
             "set_code": resolved_set_code,
@@ -133,42 +150,47 @@ def get_cardmarket_price_by_card_id(card_id: int, set_code: str | None = None) -
             "source": "ygoprodeck-set-price",
             "url": "",
         }
+        _PRICE_CACHE[cache_key] = result
+        return dict(result)
 
     set_slug = _slugify(set_name)
     card_slug = _slugify(card_name)
     product_url = f"{CARDMARKET_BASE}/{set_slug}/{card_slug}?language=1"
 
-    try:
-        request = Request(
-            product_url,
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "text/html",
-            },
-        )
-        with urlopen(request, timeout=20) as response:
-            html = response.read().decode("utf-8", "ignore")
-        parsed = _extract_price_from_html(html)
-        if parsed:
-            amount, currency = parsed
-            return {
-                "card_id": int(card_id),
-                "name": card_name,
-                "set_code": resolved_set_code,
-                "set_name": set_name,
-                "price": amount,
-                "currency": currency,
-                "source": "cardmarket-scrape",
-                "url": product_url,
-            }
-    except (HTTPError, URLError):
-        pass
+    if allow_scrape:
+        try:
+            request = Request(
+                product_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "text/html",
+                },
+            )
+            with urlopen(request, timeout=20) as response:
+                html = response.read().decode("utf-8", "ignore")
+            parsed = _extract_price_from_html(html)
+            if parsed:
+                amount, currency = parsed
+                result = {
+                    "card_id": int(card_id),
+                    "name": card_name,
+                    "set_code": resolved_set_code,
+                    "set_name": set_name,
+                    "price": amount,
+                    "currency": currency,
+                    "source": "cardmarket-scrape",
+                    "url": product_url,
+                }
+                _PRICE_CACHE[cache_key] = result
+                return dict(result)
+        except (HTTPError, URLError):
+            pass
 
     card_prices = card.get("card_prices")
     if isinstance(card_prices, list) and card_prices and isinstance(card_prices[0], dict):
         market_price = card_prices[0].get("cardmarket_price")
         if market_price not in (None, ""):
-            return {
+            result = {
                 "card_id": int(card_id),
                 "name": card_name,
                 "set_code": resolved_set_code,
@@ -178,5 +200,7 @@ def get_cardmarket_price_by_card_id(card_id: int, set_code: str | None = None) -
                 "source": "ygoprodeck-cardmarket",
                 "url": product_url,
             }
+            _PRICE_CACHE[cache_key] = result
+            return dict(result)
 
     raise RuntimeError(f"Unable to get Cardmarket price for card id '{card_id}'.")
