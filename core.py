@@ -720,6 +720,13 @@ def _normalize_deck_status(status: str) -> str:
     return normalized
 
 
+def _normalize_deck_section(section: str) -> str:
+    normalized = section.strip().lower()
+    if normalized not in {"main", "extra", "side"}:
+        raise ValueError("Deck section must be one of: main, extra, side.")
+    return normalized
+
+
 def _normalize_deck_name(deck_name: str) -> str:
     normalized = deck_name.strip()
     if normalized == "":
@@ -733,6 +740,19 @@ def _deck_card_summary(card: dict[str, object]) -> dict[str, object]:
         "name": str(card.get("name", "Unknown Card")),
         "type": str(card.get("type", "Unknown Type")),
     }
+
+
+def _infer_deck_section(card_type: str) -> str:
+    normalized = card_type.strip().lower()
+    extra_markers = (
+        "fusion monster",
+        "synchro monster",
+        "xyz monster",
+        "link monster",
+    )
+    if any(marker in normalized for marker in extra_markers):
+        return "extra"
+    return "main"
 
 
 def _resolve_any_card(card_identifier: str | int) -> dict[str, object]:
@@ -778,10 +798,15 @@ def _recompute_deck_totals(deck: dict[str, object]) -> None:
                 _as_int(normalized_cards[card_key]["quantity"], 0) + quantity
             )
         else:
+            card_type = str(raw_card.get("type", "Unknown Type"))
+            section = str(raw_card.get("section", "")).strip().lower()
+            if section not in {"main", "extra", "side"}:
+                section = _infer_deck_section(card_type)
             normalized_cards[card_key] = {
                 "card_id": card_id,
                 "name": str(raw_card.get("name", "Unknown Card")),
-                "type": str(raw_card.get("type", "Unknown Type")),
+                "type": card_type,
+                "section": section,
                 "quantity": quantity,
             }
             unique_cards += 1
@@ -945,6 +970,7 @@ def add_card_to_deck(
     deck_name: str,
     card_identifier: str | int,
     quantity: int = 1,
+    section: str | None = None,
     decks_file: Path = DEFAULT_DECKS_FILE,
 ) -> dict[str, object]:
     normalized_name = _normalize_deck_name(deck_name)
@@ -962,6 +988,11 @@ def add_card_to_deck(
     card_id = _as_int(summary.get("card_id"), -1)
     if card_id < 0:
         raise ValueError(f"Card '{card_identifier}' did not resolve to a valid card ID.")
+    target_section = (
+        _normalize_deck_section(section)
+        if section is not None
+        else _infer_deck_section(str(summary.get("type", "")))
+    )
     cards = deck.get("cards")
     if not isinstance(cards, dict):
         cards = {}
@@ -972,6 +1003,7 @@ def add_card_to_deck(
         entry = {**summary, "quantity": 0}
     entry["name"] = summary["name"]
     entry["type"] = summary["type"]
+    entry["section"] = target_section
     entry["quantity"] = _as_int(entry.get("quantity"), 0) + quantity
     cards[card_key] = entry
 
@@ -979,6 +1011,127 @@ def add_card_to_deck(
     decks[key] = deck
     save_decks(decks, decks_file)
     return deck
+
+
+def _parse_ydk_file(ydk_file: Path) -> dict[str, list[int]]:
+    if not ydk_file.exists():
+        raise ValueError(f"YDK file '{ydk_file}' was not found.")
+
+    lines = ydk_file.read_text(encoding="utf-8").splitlines()
+    sections: dict[str, list[int]] = {"main": [], "extra": [], "side": []}
+    current_section = "main"
+    for raw_line in lines:
+        line = raw_line.strip()
+        if line == "":
+            continue
+        lowered = line.lower()
+        if lowered == "#main":
+            current_section = "main"
+            continue
+        if lowered == "#extra":
+            current_section = "extra"
+            continue
+        if lowered == "!side":
+            current_section = "side"
+            continue
+        if line.startswith("#"):
+            continue
+        if not line.lstrip("-").isdigit():
+            continue
+        sections[current_section].append(int(line))
+    return sections
+
+
+def import_deck_from_ydk(
+    deck_name: str,
+    ydk_path: str | Path,
+    status: str = "future",
+    notes: str = "",
+    overwrite: bool = False,
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> dict[str, object]:
+    normalized_name = _normalize_deck_name(deck_name)
+    normalized_status = _normalize_deck_status(status)
+    ydk_file = Path(ydk_path)
+    sections = _parse_ydk_file(ydk_file)
+
+    decks = load_decks(decks_file)
+    key = normalized_name.casefold()
+    if key in decks and not overwrite:
+        raise ValueError(
+            f"Deck '{normalized_name}' already exists. Use overwrite=True to replace it."
+        )
+
+    deck = _empty_deck(normalized_name, normalized_status, notes)
+    for section_name in ("main", "extra", "side"):
+        for card_id in sections[section_name]:
+            card = get_card_by_id(card_id)
+            summary = _deck_card_summary(card)
+            resolved_id = _as_int(summary.get("card_id"), -1)
+            if resolved_id < 0:
+                continue
+            card_key = str(resolved_id)
+            entry = deck["cards"].get(card_key)
+            if isinstance(entry, dict):
+                entry["quantity"] = _as_int(entry.get("quantity"), 0) + 1
+                if section_name != "main":
+                    entry["section"] = section_name
+                deck["cards"][card_key] = entry
+            else:
+                deck["cards"][card_key] = {
+                    "card_id": resolved_id,
+                    "name": summary["name"],
+                    "type": summary["type"],
+                    "section": section_name,
+                    "quantity": 1,
+                }
+
+    _recompute_deck_totals(deck)
+    decks[key] = deck
+    save_decks(decks, decks_file)
+    return deck
+
+
+def export_deck_to_ydk(
+    deck_name: str,
+    ydk_path: str | Path,
+    created_by: str = "yugioh-db",
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> Path:
+    deck = get_deck(deck_name, decks_file=decks_file)
+    cards = deck.get("cards")
+    if not isinstance(cards, dict):
+        cards = {}
+
+    sections: dict[str, list[int]] = {"main": [], "extra": [], "side": []}
+    for entry in cards.values():
+        if not isinstance(entry, dict):
+            continue
+        card_id = _as_int(entry.get("card_id"), -1)
+        if card_id < 0:
+            continue
+        quantity = _as_int(entry.get("quantity"), 0)
+        if quantity <= 0:
+            continue
+        section = str(entry.get("section", "")).strip().lower()
+        if section not in {"main", "extra", "side"}:
+            section = _infer_deck_section(str(entry.get("type", "")))
+        for _ in range(quantity):
+            sections[section].append(card_id)
+
+    for section_name in sections:
+        sections[section_name].sort()
+
+    output_path = Path(ydk_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"#created by {created_by}", "#main"]
+    lines.extend(str(card_id) for card_id in sections["main"])
+    lines.append("#extra")
+    lines.extend(str(card_id) for card_id in sections["extra"])
+    lines.append("!side")
+    lines.extend(str(card_id) for card_id in sections["side"])
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return output_path
 
 
 def remove_card_from_deck(

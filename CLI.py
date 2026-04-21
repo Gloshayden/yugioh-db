@@ -7,10 +7,12 @@ from core import (
     add_card_to_deck,
     create_deck,
     delete_deck,
+    export_deck_to_ydk,
     format_set_display_code,
     get_card_by_name,
     get_deck,
     get_card_print_variants,
+    import_deck_from_ydk,
     list_collection,
     list_decks,
     normalize_rarity_code,
@@ -202,7 +204,8 @@ def _print_deck(deck: dict[str, object]) -> None:
             continue
         print(
             f"  - {card.get('name', 'Unknown Card')} "
-            f"(id: {card.get('card_id', 'unknown')}) x{card.get('quantity', 0)}"
+            f"(id: {card.get('card_id', 'unknown')}, "
+            f"section: {card.get('section', 'main')}) x{card.get('quantity', 0)}"
         )
 
 
@@ -236,7 +239,7 @@ def cmd_deck_show(args: argparse.Namespace) -> int:
 
 
 def cmd_deck_add(args: argparse.Namespace) -> int:
-    deck = add_card_to_deck(args.name, args.card, quantity=args.qty)
+    deck = add_card_to_deck(args.name, args.card, quantity=args.qty, section=args.section)
     print(
         f"Added {args.qty} of '{args.card}' to '{deck['name']}'. "
         f"Deck now has {deck.get('total_cards', 0)} cards."
@@ -267,6 +270,27 @@ def cmd_deck_status(args: argparse.Namespace) -> int:
 def cmd_deck_delete(args: argparse.Namespace) -> int:
     delete_deck(args.name)
     print(f"Deleted deck '{args.name}'.")
+    return 0
+
+
+def cmd_deck_import_ydk(args: argparse.Namespace) -> int:
+    deck = import_deck_from_ydk(
+        args.name,
+        args.path,
+        status=args.status,
+        notes=args.notes,
+        overwrite=args.overwrite,
+    )
+    print(
+        f"Imported '{args.path}' into deck '{deck['name']}' "
+        f"[{deck['status']}], {deck.get('total_cards', 0)} cards."
+    )
+    return 0
+
+
+def cmd_deck_export_ydk(args: argparse.Namespace) -> int:
+    output = export_deck_to_ydk(args.name, args.path)
+    print(f"Exported deck '{args.name}' to '{output}'.")
     return 0
 
 
@@ -342,6 +366,11 @@ def build_parser() -> argparse.ArgumentParser:
     deck_add_parser.add_argument("name", help="Deck name.")
     deck_add_parser.add_argument("card", help="Card ID or exact card name.")
     deck_add_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to add.")
+    deck_add_parser.add_argument(
+        "--section",
+        choices=["main", "extra", "side"],
+        help="Optional deck section (default is inferred from card type).",
+    )
     deck_add_parser.set_defaults(func=cmd_deck_add)
 
     deck_remove_parser = subparsers.add_parser("deck-remove", help="Remove a card from a deck.")
@@ -359,6 +388,32 @@ def build_parser() -> argparse.ArgumentParser:
     deck_delete_parser = subparsers.add_parser("deck-delete", help="Delete a deck.")
     deck_delete_parser.add_argument("name", help="Deck name.")
     deck_delete_parser.set_defaults(func=cmd_deck_delete)
+
+    deck_import_ydk_parser = subparsers.add_parser(
+        "deck-import-ydk", help="Import a deck from a .ydk file."
+    )
+    deck_import_ydk_parser.add_argument("name", help="Deck name to create/update.")
+    deck_import_ydk_parser.add_argument("path", help="Path to .ydk file.")
+    deck_import_ydk_parser.add_argument(
+        "--status",
+        choices=["current", "future"],
+        default="future",
+        help="Deck status after import.",
+    )
+    deck_import_ydk_parser.add_argument("--notes", default="", help="Optional deck notes.")
+    deck_import_ydk_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite deck if it already exists.",
+    )
+    deck_import_ydk_parser.set_defaults(func=cmd_deck_import_ydk)
+
+    deck_export_ydk_parser = subparsers.add_parser(
+        "deck-export-ydk", help="Export a deck to a .ydk file."
+    )
+    deck_export_ydk_parser.add_argument("name", help="Deck name.")
+    deck_export_ydk_parser.add_argument("path", help="Output .ydk path.")
+    deck_export_ydk_parser.set_defaults(func=cmd_deck_export_ydk)
 
     return parser
 

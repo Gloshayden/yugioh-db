@@ -37,7 +37,7 @@ GUI sections:
 - **Search tab**: enter set code/print code/card name, search cards, select a row, add quantity to stock.
 - **My Stock tab**: shows card name + total quantity; double-click a row to open details.
 - **Stock details popup**: image on the left, with copy/details on the right (name, full description, types, ATK, DEF, set copies, total quantity) plus delete actions (`Remove 1 Copy`, `Remove Selected Print`, `Delete Card`).
-- **Deck Builder tab**: create decks, mark them as `current`/`future`, add/remove cards by ID or name, and track deck totals.
+- **Deck Builder tab**: create decks, mark them as `current`/`future`, add/remove cards by ID or name, track deck totals, and import/export `.ydk` files.
 
 Find a set code (if you only know part of the set name):
 
@@ -117,7 +117,7 @@ Collection data is stored locally in `cache/collection.json`, grouped by `card_i
 Deck data is stored locally in `cache/decks.json`, with:
 
 - deck `name`, `status` (`current` or `future`), and `notes`
-- per-deck card list with `card_id`, `name`, `type`, and `quantity`
+- per-deck card list with `card_id`, `name`, `type`, `section`, and `quantity`
 - computed `total_cards` and `unique_cards`
 
 Create/list/update decks from the CLI:
@@ -128,8 +128,11 @@ python CLI.py deck-create "Branded Next" --status future --notes "Need 2x Cartes
 python CLI.py deck-list
 python CLI.py deck-show "Blue-Eyes Current"
 python CLI.py deck-add "Blue-Eyes Current" "Blue-Eyes White Dragon" --qty 3
+python CLI.py deck-add "Blue-Eyes Current" "Blue-Eyes Tyrant Dragon" --section extra --qty 1
 python CLI.py deck-remove "Blue-Eyes Current" "Blue-Eyes White Dragon" --qty 1
 python CLI.py deck-status "Branded Next" current
+python CLI.py deck-import-ydk "Sky Striker" "/path/to/sky_striker.ydk" --status future --overwrite
+python CLI.py deck-export-ydk "Blue-Eyes Current" "/path/to/blue_eyes_current.ydk"
 python CLI.py deck-delete "Branded Next"
 ```
 
@@ -143,4 +146,4 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`
 - `cache_low_res_card_image(card_id)` saves to `cache/images/{card_id}.jpg` (or source image extension)
 - `get_cardmarket_price_by_card_id(card_id, set_code=None)` from `pricing.py`
-- deck helpers: `create_deck`, `list_decks`, `get_deck`, `add_card_to_deck`, `remove_card_from_deck`, `set_deck_status`, `delete_deck`
+- deck helpers: `create_deck`, `list_decks`, `get_deck`, `add_card_to_deck`, `remove_card_from_deck`, `set_deck_status`, `delete_deck`, `import_deck_from_ydk`, `export_deck_to_ydk`

@@ -12,10 +12,12 @@ from core import (
     cache_low_res_card_image,
     create_deck,
     delete_deck,
+    export_deck_to_ydk,
     format_set_display_code,
     get_card_by_name,
     get_deck,
     get_card_print_variants,
+    import_deck_from_ydk,
     list_collection,
     list_decks,
     normalize_rarity_code,
@@ -48,8 +50,11 @@ DECK_REFRESH_BUTTON_KEY = "-DECK-REFRESH-"
 DECK_DELETE_BUTTON_KEY = "-DECK-DELETE-"
 DECK_SET_CURRENT_BUTTON_KEY = "-DECK-SET-CURRENT-"
 DECK_SET_FUTURE_BUTTON_KEY = "-DECK-SET-FUTURE-"
+DECK_IMPORT_YDK_BUTTON_KEY = "-DECK-IMPORT-YDK-"
+DECK_EXPORT_YDK_BUTTON_KEY = "-DECK-EXPORT-YDK-"
 DECK_CARD_INPUT_KEY = "-DECK-CARD-"
 DECK_QTY_INPUT_KEY = "-DECK-QTY-"
+DECK_SECTION_INPUT_KEY = "-DECK-SECTION-"
 DECK_ADD_CARD_BUTTON_KEY = "-DECK-ADD-CARD-"
 DECK_REMOVE_ONE_BUTTON_KEY = "-DECK-REMOVE-ONE-"
 DECK_REMOVE_ALL_BUTTON_KEY = "-DECK-REMOVE-ALL-"
@@ -160,6 +165,8 @@ def _build_deck_section() -> list[list[sg.Element]]:
                     [sg.Button("Refresh", key=DECK_REFRESH_BUTTON_KEY)],
                     [sg.Button("Set Current", key=DECK_SET_CURRENT_BUTTON_KEY)],
                     [sg.Button("Set Future", key=DECK_SET_FUTURE_BUTTON_KEY)],
+                    [sg.Button("Import YDK", key=DECK_IMPORT_YDK_BUTTON_KEY)],
+                    [sg.Button("Export YDK", key=DECK_EXPORT_YDK_BUTTON_KEY)],
                     [sg.Button("Delete Deck", key=DECK_DELETE_BUTTON_KEY)],
                 ],
                 pad=((10, 0), (0, 0)),
@@ -167,7 +174,15 @@ def _build_deck_section() -> list[list[sg.Element]]:
         ],
         [
             sg.Text("Card (ID or exact name):"),
-            sg.Input(key=DECK_CARD_INPUT_KEY, size=(30, 1)),
+            sg.Input(key=DECK_CARD_INPUT_KEY, size=(24, 1)),
+            sg.Text("Section:"),
+            sg.Combo(
+                values=["auto", "main", "extra", "side"],
+                default_value="auto",
+                readonly=True,
+                key=DECK_SECTION_INPUT_KEY,
+                size=(8, 1),
+            ),
             sg.Text("Qty:"),
             sg.Input("1", key=DECK_QTY_INPUT_KEY, size=(6, 1)),
             sg.Button("Add Card", key=DECK_ADD_CARD_BUTTON_KEY),
@@ -175,9 +190,9 @@ def _build_deck_section() -> list[list[sg.Element]]:
         [
             sg.Table(
                 values=[],
-                headings=["Card ID", "Name", "Type", "Qty"],
+                headings=["Card ID", "Name", "Type", "Section", "Qty"],
                 auto_size_columns=False,
-                col_widths=[10, 34, 16, 6],
+                col_widths=[10, 30, 14, 8, 6],
                 key=DECK_CARDS_TABLE_KEY,
                 enable_events=True,
                 justification="left",
@@ -326,6 +341,7 @@ def _deck_card_rows(deck: dict[str, object]) -> list[list[str]]:
                 str(card.get("card_id", "")),
                 str(card.get("name", "Unknown Card")),
                 str(card.get("type", "Unknown Type")),
+                str(card.get("section", "main")),
                 str(_safe_int(card.get("quantity"), 0)),
             ]
         )
@@ -702,6 +718,64 @@ def main() -> None:
                 sg.popup_error(str(exc))
             continue
 
+        if event == DECK_IMPORT_YDK_BUTTON_KEY:
+            ydk_path = sg.popup_get_file(
+                "Select a .ydk file to import",
+                title="Import YDK",
+                file_types=(("YDK Files", "*.ydk"), ("All Files", "*.*")),
+            )
+            if ydk_path in (None, ""):
+                continue
+            selected_path = Path(str(ydk_path))
+            typed_name = str(values.get(DECK_NAME_INPUT_KEY, "")).strip()
+            target_deck_name = typed_name if typed_name else selected_path.stem
+            if target_deck_name == "":
+                sg.popup_error("Enter a deck name first.")
+                continue
+
+            try:
+                import_deck_from_ydk(
+                    target_deck_name,
+                    selected_path,
+                    status=str(values.get(DECK_STATUS_INPUT_KEY, "future")),
+                    notes=str(values.get(DECK_NOTES_INPUT_KEY, "")),
+                    overwrite=True,
+                )
+                selected_deck_name = target_deck_name
+                decks = _refresh_decks(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name)
+                window[DECK_NAME_INPUT_KEY].update(value=selected_deck_name)
+                sg.popup_no_titlebar(
+                    "Deck imported from YDK.", auto_close=True, auto_close_duration=1.2
+                )
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
+        if event == DECK_EXPORT_YDK_BUTTON_KEY:
+            selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
+            if selected_deck_name is None:
+                sg.popup_error("Select a deck first.")
+                continue
+            ydk_path = sg.popup_get_file(
+                "Choose where to save the .ydk file",
+                title="Export YDK",
+                save_as=True,
+                default_extension=".ydk",
+                default_path=f"{selected_deck_name}.ydk",
+                file_types=(("YDK Files", "*.ydk"), ("All Files", "*.*")),
+            )
+            if ydk_path in (None, ""):
+                continue
+            try:
+                export_deck_to_ydk(selected_deck_name, str(ydk_path))
+                sg.popup_no_titlebar(
+                    "Deck exported to YDK.", auto_close=True, auto_close_duration=1.2
+                )
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
         if event == DECK_DELETE_BUTTON_KEY:
             selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             if selected_deck_name is None:
@@ -734,8 +808,12 @@ def main() -> None:
             if qty <= 0:
                 sg.popup_error("Quantity must be greater than 0.")
                 continue
+            selected_section = str(values.get(DECK_SECTION_INPUT_KEY, "auto")).strip().lower()
+            section_arg = None if selected_section in {"", "auto"} else selected_section
             try:
-                add_card_to_deck(selected_deck_name, card_identifier, quantity=qty)
+                add_card_to_deck(
+                    selected_deck_name, card_identifier, quantity=qty, section=section_arg
+                )
                 _refresh_selected_deck(window, selected_deck_name)
                 decks = _refresh_decks(window, selected_deck_name)
                 sg.popup_no_titlebar(
