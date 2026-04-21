@@ -4,4 +4,7 @@ version = "0.1.0"
 description = "CLI app for searching Yu-Gi-Oh cards by set code and tracking a local collection"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "freesimplegui>=5.2.0.post1",
+    "pillow>=12.2.0",
+]

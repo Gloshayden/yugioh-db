@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import FreeSimpleGUI as sg
+from PIL import Image
 
 from core import (
     add_card_to_collection,
@@ -149,6 +151,13 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
 
 
 def _open_stock_detail_popup(card: dict[str, object]) -> None:
+    def _image_data_for_gui(image_path: Path) -> bytes:
+        with Image.open(image_path) as image:
+            rgb_image = image.convert("RGB")
+            buffer = io.BytesIO()
+            rgb_image.save(buffer, format="PNG")
+            return buffer.getvalue()
+
     def _detail_copy_layout() -> list[list[sg.Element]]:
         set_lines: list[str] = []
         raw_sets = card.get("sets")
@@ -195,8 +204,8 @@ def _open_stock_detail_popup(card: dict[str, object]) -> None:
     image_element: sg.Element
     try:
         image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
-        image_element = sg.Image(filename=str(image_path), pad=((0, 14), (0, 0)))
-    except (RuntimeError, ValueError):
+        image_element = sg.Image(data=_image_data_for_gui(image_path), pad=((0, 14), (0, 0)))
+    except (RuntimeError, ValueError, OSError):
         image_element = sg.Text("Image unavailable", size=(22, 20), justification="center")
 
     layout = [[image_element, sg.Column(_detail_copy_layout(), pad=(0, 0), vertical_alignment="top")]]
