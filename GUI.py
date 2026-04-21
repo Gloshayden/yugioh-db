@@ -8,15 +8,22 @@ from PIL import Image
 
 from core import (
     add_card_to_collection,
+    add_card_to_deck,
     cache_low_res_card_image,
+    create_deck,
+    delete_deck,
     format_set_display_code,
     get_card_by_name,
+    get_deck,
     get_card_print_variants,
     list_collection,
+    list_decks,
     normalize_rarity_code,
     parse_set_code_and_rarity,
     remove_card_from_collection,
+    remove_card_from_deck,
     resolve_cards_for_identifier,
+    set_deck_status,
 )
 
 SEARCH_INPUT_KEY = "-SEARCH-SET-"
@@ -31,6 +38,22 @@ STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
 MAIN_TABS_KEY = "-MAIN-TABS-"
 SEARCH_TAB_KEY = "-SEARCH-TAB-"
 STOCK_TAB_KEY = "-STOCK-TAB-"
+DECK_TAB_KEY = "-DECK-TAB-"
+DECK_NAME_INPUT_KEY = "-DECK-NAME-"
+DECK_STATUS_INPUT_KEY = "-DECK-STATUS-"
+DECK_NOTES_INPUT_KEY = "-DECK-NOTES-"
+DECK_CREATE_BUTTON_KEY = "-DECK-CREATE-"
+DECK_LIST_KEY = "-DECK-LIST-"
+DECK_REFRESH_BUTTON_KEY = "-DECK-REFRESH-"
+DECK_DELETE_BUTTON_KEY = "-DECK-DELETE-"
+DECK_SET_CURRENT_BUTTON_KEY = "-DECK-SET-CURRENT-"
+DECK_SET_FUTURE_BUTTON_KEY = "-DECK-SET-FUTURE-"
+DECK_CARD_INPUT_KEY = "-DECK-CARD-"
+DECK_QTY_INPUT_KEY = "-DECK-QTY-"
+DECK_ADD_CARD_BUTTON_KEY = "-DECK-ADD-CARD-"
+DECK_REMOVE_ONE_BUTTON_KEY = "-DECK-REMOVE-ONE-"
+DECK_REMOVE_ALL_BUTTON_KEY = "-DECK-REMOVE-ALL-"
+DECK_CARDS_TABLE_KEY = "-DECK-CARDS-"
 IMAGE_CACHE_DIR = Path("cache/images")
 
 
@@ -100,6 +123,78 @@ def _build_stock_section() -> list[list[sg.Element]]:
     ]
 
 
+def _build_deck_section() -> list[list[sg.Element]]:
+    return [
+        [sg.Text("Deck Builder (track current and future decks)")],
+        [
+            sg.Text("Deck Name:"),
+            sg.Input(key=DECK_NAME_INPUT_KEY, size=(22, 1)),
+            sg.Text("Status:"),
+            sg.Combo(
+                values=["future", "current"],
+                default_value="future",
+                readonly=True,
+                key=DECK_STATUS_INPUT_KEY,
+                size=(10, 1),
+            ),
+            sg.Button("Create Deck", key=DECK_CREATE_BUTTON_KEY),
+        ],
+        [
+            sg.Text("Notes:"),
+            sg.Input(key=DECK_NOTES_INPUT_KEY, size=(60, 1)),
+        ],
+        [
+            sg.Table(
+                values=[],
+                headings=["Deck", "Status", "Cards", "Unique"],
+                auto_size_columns=False,
+                col_widths=[24, 10, 8, 8],
+                key=DECK_LIST_KEY,
+                enable_events=True,
+                justification="left",
+                select_mode=sg.TABLE_SELECT_MODE_BROWSE,
+                num_rows=6,
+            ),
+            sg.Column(
+                [
+                    [sg.Button("Refresh", key=DECK_REFRESH_BUTTON_KEY)],
+                    [sg.Button("Set Current", key=DECK_SET_CURRENT_BUTTON_KEY)],
+                    [sg.Button("Set Future", key=DECK_SET_FUTURE_BUTTON_KEY)],
+                    [sg.Button("Delete Deck", key=DECK_DELETE_BUTTON_KEY)],
+                ],
+                pad=((10, 0), (0, 0)),
+            ),
+        ],
+        [
+            sg.Text("Card (ID or exact name):"),
+            sg.Input(key=DECK_CARD_INPUT_KEY, size=(30, 1)),
+            sg.Text("Qty:"),
+            sg.Input("1", key=DECK_QTY_INPUT_KEY, size=(6, 1)),
+            sg.Button("Add Card", key=DECK_ADD_CARD_BUTTON_KEY),
+        ],
+        [
+            sg.Table(
+                values=[],
+                headings=["Card ID", "Name", "Type", "Qty"],
+                auto_size_columns=False,
+                col_widths=[10, 34, 16, 6],
+                key=DECK_CARDS_TABLE_KEY,
+                enable_events=True,
+                justification="left",
+                select_mode=sg.TABLE_SELECT_MODE_BROWSE,
+                num_rows=7,
+            ),
+            sg.Column(
+                [
+                    [sg.Button("Remove 1", key=DECK_REMOVE_ONE_BUTTON_KEY)],
+                    [sg.Button("Remove Card", key=DECK_REMOVE_ALL_BUTTON_KEY)],
+                ],
+                pad=((10, 0), (0, 0)),
+            ),
+        ],
+    ]
+
+
 def _layout() -> list[list[sg.Element]]:
     return [
         [
@@ -108,6 +203,7 @@ def _layout() -> list[list[sg.Element]]:
                     [
                         sg.Tab("Search", _build_search_section(), key=SEARCH_TAB_KEY),
                         sg.Tab("My Stock", _build_stock_section(), key=STOCK_TAB_KEY),
+                        sg.Tab("Deck Builder", _build_deck_section(), key=DECK_TAB_KEY),
                     ]
                 ],
                 key=MAIN_TABS_KEY,
@@ -201,6 +297,61 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
     cards = list_collection()
     window[STOCK_TABLE_KEY].update(values=_stock_rows(cards))
     return cards
+
+
+def _deck_rows(decks: list[dict[str, object]]) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for deck in decks:
+        rows.append(
+            [
+                str(deck.get("name", "Unknown Deck")),
+                str(deck.get("status", "future")),
+                str(_safe_int(deck.get("total_cards"), 0)),
+                str(_safe_int(deck.get("unique_cards"), 0)),
+            ]
+        )
+    return rows
+
+
+def _deck_card_rows(deck: dict[str, object]) -> list[list[str]]:
+    cards = deck.get("cards")
+    if not isinstance(cards, dict):
+        return []
+    rows: list[list[str]] = []
+    for card in sorted(cards.values(), key=lambda item: str(item.get("name", "")).casefold()):
+        if not isinstance(card, dict):
+            continue
+        rows.append(
+            [
+                str(card.get("card_id", "")),
+                str(card.get("name", "Unknown Card")),
+                str(card.get("type", "Unknown Type")),
+                str(_safe_int(card.get("quantity"), 0)),
+            ]
+        )
+    return rows
+
+
+def _refresh_decks(window: sg.Window) -> list[dict[str, object]]:
+    decks = list_decks()
+    window[DECK_LIST_KEY].update(values=_deck_rows(decks))
+    return decks
+
+
+def _refresh_selected_deck(window: sg.Window, deck_name: str | None) -> dict[str, object] | None:
+    if deck_name is None or deck_name.strip() == "":
+        window[DECK_CARDS_TABLE_KEY].update(values=[])
+        return None
+    deck = get_deck(deck_name)
+    window[DECK_CARDS_TABLE_KEY].update(values=_deck_card_rows(deck))
+    return deck
+
+
+def _selected_deck_name(values: dict[str, object], decks: list[dict[str, object]]) -> str | None:
+    row_index = _selected_table_index(values, DECK_LIST_KEY)
+    if row_index is None or row_index < 0 or row_index >= len(decks):
+        return None
+    return str(decks[row_index].get("name", "")).strip() or None
 
 
 def _open_stock_detail_popup(card: dict[str, object]) -> bool:
@@ -382,6 +533,8 @@ def main() -> None:
 
     search_entries: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
+    decks = _refresh_decks(window)
+    selected_deck_name: str | None = None
 
     while True:
         event, values = window.read()
@@ -470,6 +623,121 @@ def main() -> None:
 
         if event == REFRESH_STOCK_KEY:
             stock_cards = _refresh_stock(window)
+            continue
+
+        if event == DECK_REFRESH_BUTTON_KEY:
+            decks = _refresh_decks(window)
+            selected_deck_name = _selected_deck_name(values, decks)
+            _refresh_selected_deck(window, selected_deck_name)
+            continue
+
+        if event == DECK_LIST_KEY:
+            selected_deck_name = _selected_deck_name(values, decks)
+            _refresh_selected_deck(window, selected_deck_name)
+            continue
+
+        if event == DECK_CREATE_BUTTON_KEY:
+            deck_name = str(values.get(DECK_NAME_INPUT_KEY, "")).strip()
+            status = str(values.get(DECK_STATUS_INPUT_KEY, "future")).strip().lower()
+            notes = str(values.get(DECK_NOTES_INPUT_KEY, "")).strip()
+            if deck_name == "":
+                sg.popup_error("Deck name is required.")
+                continue
+            try:
+                create_deck(deck_name, status=status, notes=notes)
+                decks = _refresh_decks(window)
+                selected_deck_name = deck_name
+                _refresh_selected_deck(window, selected_deck_name)
+                sg.popup_no_titlebar(
+                    "Deck created.", auto_close=True, auto_close_duration=1.2
+                )
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
+        if event in (DECK_SET_CURRENT_BUTTON_KEY, DECK_SET_FUTURE_BUTTON_KEY):
+            selected_deck_name = _selected_deck_name(values, decks)
+            if selected_deck_name is None:
+                sg.popup_error("Select a deck first.")
+                continue
+            status = "current" if event == DECK_SET_CURRENT_BUTTON_KEY else "future"
+            try:
+                set_deck_status(selected_deck_name, status)
+                decks = _refresh_decks(window)
+                _refresh_selected_deck(window, selected_deck_name)
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
+        if event == DECK_DELETE_BUTTON_KEY:
+            selected_deck_name = _selected_deck_name(values, decks)
+            if selected_deck_name is None:
+                sg.popup_error("Select a deck first.")
+                continue
+            confirmation = sg.popup_yes_no(
+                f"Delete deck '{selected_deck_name}'?", title="Confirm Delete"
+            )
+            if confirmation != "Yes":
+                continue
+            try:
+                delete_deck(selected_deck_name)
+                decks = _refresh_decks(window)
+                selected_deck_name = None
+                _refresh_selected_deck(window, selected_deck_name)
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
+        if event == DECK_ADD_CARD_BUTTON_KEY:
+            selected_deck_name = _selected_deck_name(values, decks)
+            if selected_deck_name is None:
+                sg.popup_error("Select a deck first.")
+                continue
+            card_identifier = str(values.get(DECK_CARD_INPUT_KEY, "")).strip()
+            if card_identifier == "":
+                sg.popup_error("Enter a card ID or exact card name.")
+                continue
+            qty = _safe_int(values.get(DECK_QTY_INPUT_KEY), 0)
+            if qty <= 0:
+                sg.popup_error("Quantity must be greater than 0.")
+                continue
+            try:
+                add_card_to_deck(selected_deck_name, card_identifier, quantity=qty)
+                _refresh_selected_deck(window, selected_deck_name)
+                decks = _refresh_decks(window)
+                sg.popup_no_titlebar(
+                    "Card added to deck.", auto_close=True, auto_close_duration=1.2
+                )
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
+
+        if event in (DECK_REMOVE_ONE_BUTTON_KEY, DECK_REMOVE_ALL_BUTTON_KEY):
+            selected_deck_name = _selected_deck_name(values, decks)
+            if selected_deck_name is None:
+                sg.popup_error("Select a deck first.")
+                continue
+            deck = _refresh_selected_deck(window, selected_deck_name)
+            if deck is None:
+                sg.popup_error("Select a deck first.")
+                continue
+            row_index = _selected_table_index(values, DECK_CARDS_TABLE_KEY)
+            card_rows = _deck_card_rows(deck)
+            if row_index is None or row_index < 0 or row_index >= len(card_rows):
+                sg.popup_error("Select a deck card first.")
+                continue
+            card_id = card_rows[row_index][0]
+            try:
+                remove_card_from_deck(
+                    selected_deck_name,
+                    card_id,
+                    quantity=1,
+                    remove_all=(event == DECK_REMOVE_ALL_BUTTON_KEY),
+                )
+                _refresh_selected_deck(window, selected_deck_name)
+                decks = _refresh_decks(window)
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
             continue
 
         if event == STOCK_DOUBLE_CLICK_EVENT:

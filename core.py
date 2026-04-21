@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 API_BASE = "https://db.ygoprodeck.com/api/v7"
 DEFAULT_COLLECTION_FILE = Path("cache/collection.json")
+DEFAULT_DECKS_FILE = Path("cache/decks.json")
 DEFAULT_PHOTOS_DIR = Path("cache/images")
 RARITY_CODE_PATTERN = re.compile(r"^\s*(?P<code>.+?)(?:\s*\((?P<rarity>[^()]+)\))?\s*$")
 
@@ -710,3 +711,310 @@ def remove_card_from_collection(
     collection[key] = card
     save_collection(collection, collection_file)
     return {"removed": False, "card": card, "set_code": selected_set_code}
+
+
+def _normalize_deck_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized not in {"current", "future"}:
+        raise ValueError("Deck status must be either 'current' or 'future'.")
+    return normalized
+
+
+def _normalize_deck_name(deck_name: str) -> str:
+    normalized = deck_name.strip()
+    if normalized == "":
+        raise ValueError("Deck name cannot be empty.")
+    return normalized
+
+
+def _deck_card_summary(card: dict[str, object]) -> dict[str, object]:
+    return {
+        "card_id": _as_int(card.get("id"), -1),
+        "name": str(card.get("name", "Unknown Card")),
+        "type": str(card.get("type", "Unknown Type")),
+    }
+
+
+def _resolve_any_card(card_identifier: str | int) -> dict[str, object]:
+    if isinstance(card_identifier, int):
+        return get_card_by_id(card_identifier)
+    raw_identifier = str(card_identifier).strip()
+    if raw_identifier == "":
+        raise ValueError("Card identifier cannot be empty.")
+    if _is_int_text(raw_identifier):
+        return get_card_by_id(int(raw_identifier))
+    return get_card_by_name(raw_identifier)
+
+
+def _empty_deck(name: str, status: str = "future", notes: str = "") -> dict[str, object]:
+    return {
+        "name": name,
+        "status": _normalize_deck_status(status),
+        "notes": notes.strip(),
+        "cards": {},
+    }
+
+
+def _recompute_deck_totals(deck: dict[str, object]) -> None:
+    raw_cards = deck.get("cards")
+    if not isinstance(raw_cards, dict):
+        raw_cards = {}
+
+    normalized_cards: dict[str, dict[str, object]] = {}
+    total_cards = 0
+    unique_cards = 0
+    for key, raw_card in raw_cards.items():
+        if not isinstance(raw_card, dict):
+            continue
+        card_id = _as_int(raw_card.get("card_id", key), -1)
+        if card_id < 0:
+            continue
+        quantity = _as_int(raw_card.get("quantity"), 0)
+        if quantity <= 0:
+            continue
+        card_key = str(card_id)
+        if card_key in normalized_cards:
+            normalized_cards[card_key]["quantity"] = (
+                _as_int(normalized_cards[card_key]["quantity"], 0) + quantity
+            )
+        else:
+            normalized_cards[card_key] = {
+                "card_id": card_id,
+                "name": str(raw_card.get("name", "Unknown Card")),
+                "type": str(raw_card.get("type", "Unknown Type")),
+                "quantity": quantity,
+            }
+            unique_cards += 1
+        total_cards += quantity
+
+    deck["cards"] = normalized_cards
+    deck["total_cards"] = total_cards
+    deck["unique_cards"] = unique_cards
+
+
+def load_decks(decks_file: Path = DEFAULT_DECKS_FILE) -> dict[str, dict[str, object]]:
+    if not decks_file.exists():
+        return {}
+
+    raw = decks_file.read_text(encoding="utf-8")
+    if raw.strip() == "":
+        return {}
+
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{decks_file} must contain a JSON object.")
+
+    normalized: dict[str, dict[str, object]] = {}
+    for key, value in data.items():
+        if not isinstance(value, dict):
+            continue
+        name = _normalize_deck_name(str(value.get("name", key)))
+        status = _normalize_deck_status(str(value.get("status", "future")))
+        notes = str(value.get("notes", ""))
+        deck = _empty_deck(name, status, notes)
+        cards = value.get("cards")
+        if isinstance(cards, dict):
+            deck["cards"] = cards
+        _recompute_deck_totals(deck)
+        normalized[name.casefold()] = deck
+
+    return normalized
+
+
+def save_decks(
+    decks: dict[str, dict[str, object]],
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> None:
+    decks_file.parent.mkdir(parents=True, exist_ok=True)
+    by_name: dict[str, dict[str, object]] = {}
+    for deck in sorted(decks.values(), key=lambda item: str(item.get("name", "")).casefold()):
+        if not isinstance(deck, dict):
+            continue
+        name = str(deck.get("name", "")).strip()
+        if name == "":
+            continue
+        by_name[name] = deck
+    decks_file.write_text(
+        json.dumps(by_name, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+
+def create_deck(
+    deck_name: str,
+    status: str = "future",
+    notes: str = "",
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> dict[str, object]:
+    normalized_name = _normalize_deck_name(deck_name)
+    normalized_status = _normalize_deck_status(status)
+    decks = load_decks(decks_file)
+    key = normalized_name.casefold()
+    if key in decks:
+        raise ValueError(f"Deck '{normalized_name}' already exists.")
+    deck = _empty_deck(normalized_name, normalized_status, notes)
+    _recompute_deck_totals(deck)
+    decks[key] = deck
+    save_decks(decks, decks_file)
+    return deck
+
+
+def list_decks(
+    status: str | None = None,
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> list[dict[str, object]]:
+    decks = load_decks(decks_file)
+    normalized_status = _normalize_deck_status(status) if status is not None else None
+    items = []
+    for deck in decks.values():
+        if normalized_status is not None and str(deck.get("status")) != normalized_status:
+            continue
+        items.append(deck)
+    return sorted(items, key=lambda item: str(item.get("name", "")).casefold())
+
+
+def get_deck(deck_name: str, decks_file: Path = DEFAULT_DECKS_FILE) -> dict[str, object]:
+    normalized_name = _normalize_deck_name(deck_name)
+    decks = load_decks(decks_file)
+    deck = decks.get(normalized_name.casefold())
+    if deck is None:
+        raise ValueError(f"Deck '{normalized_name}' was not found.")
+    return deck
+
+
+def set_deck_status(
+    deck_name: str,
+    status: str,
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> dict[str, object]:
+    normalized_name = _normalize_deck_name(deck_name)
+    normalized_status = _normalize_deck_status(status)
+    decks = load_decks(decks_file)
+    key = normalized_name.casefold()
+    deck = decks.get(key)
+    if deck is None:
+        raise ValueError(f"Deck '{normalized_name}' was not found.")
+    deck["status"] = normalized_status
+    _recompute_deck_totals(deck)
+    decks[key] = deck
+    save_decks(decks, decks_file)
+    return deck
+
+
+def delete_deck(deck_name: str, decks_file: Path = DEFAULT_DECKS_FILE) -> None:
+    normalized_name = _normalize_deck_name(deck_name)
+    decks = load_decks(decks_file)
+    key = normalized_name.casefold()
+    if key not in decks:
+        raise ValueError(f"Deck '{normalized_name}' was not found.")
+    del decks[key]
+    save_decks(decks, decks_file)
+
+
+def _resolve_deck_card_id(deck: dict[str, object], card_identifier: str | int) -> int:
+    cards = deck.get("cards")
+    if not isinstance(cards, dict):
+        cards = {}
+    if isinstance(card_identifier, int):
+        return card_identifier
+    raw_identifier = str(card_identifier).strip()
+    if raw_identifier == "":
+        raise ValueError("Card identifier cannot be empty.")
+    if _is_int_text(raw_identifier):
+        return int(raw_identifier)
+    target_name = _normalize_name(raw_identifier)
+    matches: list[int] = []
+    for item in cards.values():
+        if not isinstance(item, dict):
+            continue
+        if _normalize_name(str(item.get("name", ""))) != target_name:
+            continue
+        card_id = _as_int(item.get("card_id"), -1)
+        if card_id >= 0:
+            matches.append(card_id)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        choices = ", ".join(str(card_id) for card_id in sorted(set(matches)))
+        raise ValueError(
+            f"Multiple deck cards matched '{card_identifier}'. Use card ID instead: {choices}."
+        )
+    raise ValueError(f"Card '{card_identifier}' is not in this deck.")
+
+
+def add_card_to_deck(
+    deck_name: str,
+    card_identifier: str | int,
+    quantity: int = 1,
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> dict[str, object]:
+    normalized_name = _normalize_deck_name(deck_name)
+    if quantity <= 0:
+        raise ValueError("Quantity must be greater than 0.")
+
+    decks = load_decks(decks_file)
+    key = normalized_name.casefold()
+    deck = decks.get(key)
+    if deck is None:
+        raise ValueError(f"Deck '{normalized_name}' was not found.")
+
+    card = _resolve_any_card(card_identifier)
+    summary = _deck_card_summary(card)
+    card_id = _as_int(summary.get("card_id"), -1)
+    if card_id < 0:
+        raise ValueError(f"Card '{card_identifier}' did not resolve to a valid card ID.")
+    cards = deck.get("cards")
+    if not isinstance(cards, dict):
+        cards = {}
+        deck["cards"] = cards
+    card_key = str(card_id)
+    entry = cards.get(card_key)
+    if not isinstance(entry, dict):
+        entry = {**summary, "quantity": 0}
+    entry["name"] = summary["name"]
+    entry["type"] = summary["type"]
+    entry["quantity"] = _as_int(entry.get("quantity"), 0) + quantity
+    cards[card_key] = entry
+
+    _recompute_deck_totals(deck)
+    decks[key] = deck
+    save_decks(decks, decks_file)
+    return deck
+
+
+def remove_card_from_deck(
+    deck_name: str,
+    card_identifier: str | int,
+    quantity: int = 1,
+    remove_all: bool = False,
+    decks_file: Path = DEFAULT_DECKS_FILE,
+) -> dict[str, object]:
+    normalized_name = _normalize_deck_name(deck_name)
+    if quantity <= 0:
+        raise ValueError("Quantity must be greater than 0.")
+
+    decks = load_decks(decks_file)
+    key = normalized_name.casefold()
+    deck = decks.get(key)
+    if deck is None:
+        raise ValueError(f"Deck '{normalized_name}' was not found.")
+    cards = deck.get("cards")
+    if not isinstance(cards, dict) or not cards:
+        raise ValueError(f"Deck '{normalized_name}' has no cards.")
+
+    card_id = _resolve_deck_card_id(deck, card_identifier)
+    card_key = str(card_id)
+    entry = cards.get(card_key)
+    if not isinstance(entry, dict):
+        raise ValueError(f"Card '{card_identifier}' is not in this deck.")
+
+    current_qty = _as_int(entry.get("quantity"), 0)
+    if remove_all or quantity >= current_qty:
+        del cards[card_key]
+    else:
+        entry["quantity"] = current_qty - quantity
+        cards[card_key] = entry
+
+    _recompute_deck_totals(deck)
+    decks[key] = deck
+    save_decks(decks, decks_file)
+    return deck

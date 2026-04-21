@@ -4,13 +4,20 @@ import argparse
 
 from core import (
     add_card_to_collection,
+    add_card_to_deck,
+    create_deck,
+    delete_deck,
     format_set_display_code,
     get_card_by_name,
+    get_deck,
     get_card_print_variants,
     list_collection,
+    list_decks,
     normalize_rarity_code,
     remove_card_from_collection,
+    remove_card_from_deck,
     resolve_cards_for_identifier,
+    set_deck_status,
     search_set_codes,
 )
 from pricing import get_cardmarket_price_by_card_id
@@ -180,6 +187,89 @@ def cmd_price(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_deck(deck: dict[str, object]) -> None:
+    print(
+        f"{deck.get('name', 'Unknown Deck')} "
+        f"[{deck.get('status', 'future')}] - "
+        f"{deck.get('total_cards', 0)} cards, {deck.get('unique_cards', 0)} unique"
+    )
+    cards = deck.get("cards")
+    if not isinstance(cards, dict) or not cards:
+        print("  (empty)")
+        return
+    for card in sorted(cards.values(), key=lambda item: str(item.get("name", "")).casefold()):
+        if not isinstance(card, dict):
+            continue
+        print(
+            f"  - {card.get('name', 'Unknown Card')} "
+            f"(id: {card.get('card_id', 'unknown')}) x{card.get('quantity', 0)}"
+        )
+
+
+def cmd_deck_create(args: argparse.Namespace) -> int:
+    deck = create_deck(args.name, status=args.status, notes=args.notes)
+    print(
+        f"Created deck '{deck['name']}' with status '{deck['status']}'."
+    )
+    return 0
+
+
+def cmd_deck_list(args: argparse.Namespace) -> int:
+    decks = list_decks(status=args.status)
+    if not decks:
+        print("No decks saved yet.")
+        return 0
+    print("Saved decks:")
+    for deck in decks:
+        print(
+            f"- {deck.get('name', 'Unknown Deck')} "
+            f"[{deck.get('status', 'future')}] "
+            f"({deck.get('total_cards', 0)} cards, {deck.get('unique_cards', 0)} unique)"
+        )
+    return 0
+
+
+def cmd_deck_show(args: argparse.Namespace) -> int:
+    deck = get_deck(args.name)
+    _print_deck(deck)
+    return 0
+
+
+def cmd_deck_add(args: argparse.Namespace) -> int:
+    deck = add_card_to_deck(args.name, args.card, quantity=args.qty)
+    print(
+        f"Added {args.qty} of '{args.card}' to '{deck['name']}'. "
+        f"Deck now has {deck.get('total_cards', 0)} cards."
+    )
+    return 0
+
+
+def cmd_deck_remove(args: argparse.Namespace) -> int:
+    deck = remove_card_from_deck(
+        args.name,
+        args.card,
+        quantity=args.qty,
+        remove_all=args.all,
+    )
+    print(
+        f"Updated deck '{deck['name']}'. "
+        f"Deck now has {deck.get('total_cards', 0)} cards."
+    )
+    return 0
+
+
+def cmd_deck_status(args: argparse.Namespace) -> int:
+    deck = set_deck_status(args.name, args.status)
+    print(f"Deck '{deck['name']}' is now marked as '{deck['status']}'.")
+    return 0
+
+
+def cmd_deck_delete(args: argparse.Namespace) -> int:
+    delete_deck(args.name)
+    print(f"Deleted deck '{args.name}'.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Search Yu-Gi-Oh cards by set code and track your collection.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -224,6 +314,51 @@ def build_parser() -> argparse.ArgumentParser:
     price_parser.add_argument("card", help="Card ID or exact card name.")
     price_parser.add_argument("--set-code", help="Optional set/print code (for example: RA02-EN021).")
     price_parser.set_defaults(func=cmd_price)
+
+    deck_create_parser = subparsers.add_parser("deck-create", help="Create a deck.")
+    deck_create_parser.add_argument("name", help="Deck name.")
+    deck_create_parser.add_argument(
+        "--status",
+        choices=["current", "future"],
+        default="future",
+        help="Deck status.",
+    )
+    deck_create_parser.add_argument("--notes", default="", help="Optional deck notes.")
+    deck_create_parser.set_defaults(func=cmd_deck_create)
+
+    deck_list_parser = subparsers.add_parser("deck-list", help="List saved decks.")
+    deck_list_parser.add_argument(
+        "--status",
+        choices=["current", "future"],
+        help="Filter by deck status.",
+    )
+    deck_list_parser.set_defaults(func=cmd_deck_list)
+
+    deck_show_parser = subparsers.add_parser("deck-show", help="Show a deck's cards.")
+    deck_show_parser.add_argument("name", help="Deck name.")
+    deck_show_parser.set_defaults(func=cmd_deck_show)
+
+    deck_add_parser = subparsers.add_parser("deck-add", help="Add a card to a deck.")
+    deck_add_parser.add_argument("name", help="Deck name.")
+    deck_add_parser.add_argument("card", help="Card ID or exact card name.")
+    deck_add_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to add.")
+    deck_add_parser.set_defaults(func=cmd_deck_add)
+
+    deck_remove_parser = subparsers.add_parser("deck-remove", help="Remove a card from a deck.")
+    deck_remove_parser.add_argument("name", help="Deck name.")
+    deck_remove_parser.add_argument("card", help="Card ID or exact card name.")
+    deck_remove_parser.add_argument("--qty", type=positive_int, default=1, help="Quantity to remove.")
+    deck_remove_parser.add_argument("--all", action="store_true", help="Remove this card from the deck.")
+    deck_remove_parser.set_defaults(func=cmd_deck_remove)
+
+    deck_status_parser = subparsers.add_parser("deck-status", help="Set deck status.")
+    deck_status_parser.add_argument("name", help="Deck name.")
+    deck_status_parser.add_argument("status", choices=["current", "future"], help="Deck status.")
+    deck_status_parser.set_defaults(func=cmd_deck_status)
+
+    deck_delete_parser = subparsers.add_parser("deck-delete", help="Delete a deck.")
+    deck_delete_parser.add_argument("name", help="Deck name.")
+    deck_delete_parser.set_defaults(func=cmd_deck_delete)
 
     return parser
 
