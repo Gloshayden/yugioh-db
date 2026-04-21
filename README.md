@@ -5,11 +5,24 @@ Simple CLI app to search Yu-Gi-Oh cards by **set code** and track how many copie
 ## Requirements
 
 - Python 3.14+
+- Tkinter runtime (required by FreeSimpleGUI GUI)
+
+Install project dependencies:
+
+```bash
+uv sync
+```
+
+If Tkinter is missing on Linux:
+
+```bash
+sudo apt-get install python3-tk
+```
 
 ## Usage
 
 ```bash
-python main.py --help
+python CLI.py --help
 ```
 
 ## GUI
@@ -21,62 +34,62 @@ python GUI.py
 ```
 
 GUI sections:
-- **Search**: enter set code/print code, search cards, select a row, add quantity to stock.
-- **My Stock**: shows card name + total quantity; double-click a row to open details.
-- **Stock details popup**: shows image on the left and name, full description, types, ATK, DEF on the right.
+- **Search tab**: enter set code/print code, search cards, select a row, add quantity to stock.
+- **My Stock tab**: shows card name + total quantity; double-click a row to open details.
+- **Stock details popup**: image on the left, with copy/details on the right (name, full description, types, ATK, DEF, set copies, total quantity).
 
 Find a set code (if you only know part of the set name):
 
 ```bash
-python main.py sets "blue eyes"
+python CLI.py sets "blue eyes"
 ```
 
 Search cards in a set:
 
 ```bash
-python main.py search YS15
+python CLI.py search YS15
 ```
 
 Search using a full print code:
 
 ```bash
-python main.py search RA02-EN021
+python CLI.py search RA02-EN021
 ```
 
 Save a card and quantity:
 
 ```bash
-python main.py add YS15 85639257 --qty 2
+python CLI.py add YS15 85639257 --qty 2
 ```
 
 You can also add by full print code:
 
 ```bash
-python main.py add RA02-EN021 37818794 --qty 1
+python CLI.py add RA02-EN021 37818794 --qty 1
 ```
 
 Show your saved collection:
 
 ```bash
-python main.py list
+python CLI.py list
 ```
 
 Get Cardmarket price by card ID:
 
 ```bash
-python main.py price 37818794 --set-code RA02-EN021
+python CLI.py price 37818794 --set-code RA02-EN021
 ```
 
 Remove one copy (or use `--all` to remove the card entirely):
 
 ```bash
-python main.py remove 85639257 --qty 1
+python CLI.py remove 85639257 --qty 1
 ```
 
 If a card ID has multiple set/print quantities, specify the exact one:
 
 ```bash
-python main.py remove 37818794 --set-code RA02-EN021 --all
+python CLI.py remove 37818794 --set-code RA02-EN021 --all
 ```
 
 Collection data is stored locally in `cache/collection.json`, grouped by `card_id` with shared details plus:
@@ -94,3 +107,4 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`
 - `cache_low_res_card_image(card_id)` saves to `cache/images/{card_id}.jpg` (or source image extension)
 - `get_cardmarket_price_by_card_id(card_id, set_code=None)` from `pricing.py`
+
