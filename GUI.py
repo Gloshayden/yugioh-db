@@ -43,6 +43,7 @@ MAIN_TABS_KEY = "-MAIN-TABS-"
 SEARCH_TAB_KEY = "-SEARCH-TAB-"
 STOCK_TAB_KEY = "-STOCK-TAB-"
 DECK_TAB_KEY = "-DECK-TAB-"
+SETTINGS_TAB_KEY = "-SETTINGS-TAB-"
 DECK_NAME_INPUT_KEY = "-DECK-NAME-"
 DECK_STATUS_INPUT_KEY = "-DECK-STATUS-"
 DECK_NOTES_INPUT_KEY = "-DECK-NOTES-"
@@ -246,6 +247,14 @@ def _build_deck_section() -> list[list[sg.Element]]:
     ]
 
 
+def _build_settings_section() -> list[list[sg.Element]]:
+    return [
+        [
+            sg.Text("This is the app Settings (Soon)"),
+        ]
+    ]
+
+
 def _layout() -> list[list[sg.Element]]:
     return [
         [
@@ -255,6 +264,9 @@ def _layout() -> list[list[sg.Element]]:
                         sg.Tab("Search", _build_search_section(), key=SEARCH_TAB_KEY),
                         sg.Tab("My Stock", _build_stock_section(), key=STOCK_TAB_KEY),
                         sg.Tab("Deck Builder", _build_deck_section(), key=DECK_TAB_KEY),
+                        sg.Tab(
+                            "Settings", _build_settings_section(), key=SETTINGS_TAB_KEY
+                        ),
                     ]
                 ],
                 key=MAIN_TABS_KEY,
@@ -418,6 +430,11 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
 
 def _refresh_total(window: sg.Window):
     cards = list_collection()
+    sg.popup_no_titlebar(
+        "Getting prices (this may take a while)",
+        auto_close=True,
+        auto_close_duration=1.2,
+    )
     total_value, missing_prices, top_five = _stock_total_value(cards)
     value_text = f"Total stock value: {total_value:.2f} EUR"
     if missing_prices > 0:
