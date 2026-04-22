@@ -38,6 +38,7 @@ STOCK_TABLE_KEY = "-STOCK-TABLE-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
 STOCK_TOTAL_VALUE_KEY = "-STOCK-TOTAL-VALUE-"
+STOCK_TOP_FIVE_KEY = "-STOCK-TOP-FIVE-"
 MAIN_TABS_KEY = "-MAIN-TABS-"
 SEARCH_TAB_KEY = "-SEARCH-TAB-"
 STOCK_TAB_KEY = "-STOCK-TAB-"
@@ -131,6 +132,16 @@ def _build_stock_section() -> list[list[sg.Element]]:
             sg.Button("Refresh", key=REFRESH_STOCK_KEY),
         ],
         [sg.Text("Total stock value: 0.00 EUR", key=STOCK_TOTAL_VALUE_KEY)],
+        [sg.Text("Top 5 most expensive cards:")],
+        [
+            sg.Multiline(
+                default_text="(No priced cards yet)",
+                size=(68, 6),
+                disabled=True,
+                no_scrollbar=False,
+                key=STOCK_TOP_FIVE_KEY,
+            )
+        ],
     ]
 
 
@@ -333,13 +344,18 @@ def _as_float(value: object, default: float = 0.0) -> float:
         return default
 
 
-def _stock_total_value(cards: list[dict[str, object]]) -> tuple[float, int]:
+def _stock_total_value(
+    cards: list[dict[str, object]]
+) -> tuple[float, int, list[tuple[str, float]]]:
     total_value = 0.0
     missing_prices = 0
+    card_totals: dict[int, float] = {}
+    card_names: dict[int, str] = {}
     for card in cards:
         card_id = _safe_int(card.get("card_id"), -1)
         if card_id < 0:
             continue
+        card_names[card_id] = str(card.get("name", "Unknown Card"))
         sets = card.get("sets")
         if not isinstance(sets, dict):
             continue
@@ -371,18 +387,38 @@ def _stock_total_value(cards: list[dict[str, object]]) -> tuple[float, int]:
                     continue
                 _STOCK_PRICE_CACHE[cache_key] = parsed_price
                 price = parsed_price
-            total_value += price * quantity
-    return total_value, missing_prices
+            line_total = price * quantity
+            total_value += line_total
+            card_totals[card_id] = card_totals.get(card_id, 0.0) + line_total
+
+    top_five = sorted(
+        (
+            (card_names.get(card_id, "Unknown Card"), value)
+            for card_id, value in card_totals.items()
+            if value > 0
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:5]
+    return total_value, missing_prices, top_five
 
 
 def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
     cards = list_collection()
     window[STOCK_TABLE_KEY].update(values=_stock_rows(cards))
-    total_value, missing_prices = _stock_total_value(cards)
+    total_value, missing_prices, top_five = _stock_total_value(cards)
     value_text = f"Total stock value: {total_value:.2f} EUR"
     if missing_prices > 0:
         value_text += f" (missing price for {missing_prices} prints)"
     window[STOCK_TOTAL_VALUE_KEY].update(value_text)
+    if top_five:
+        lines = [
+            f"{index}. {name} - {value:.2f} EUR"
+            for index, (name, value) in enumerate(top_five, start=1)
+        ]
+        window[STOCK_TOP_FIVE_KEY].update("\n".join(lines))
+    else:
+        window[STOCK_TOP_FIVE_KEY].update("(No priced cards yet)")
     return cards
 
 
