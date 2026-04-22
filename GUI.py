@@ -33,7 +33,7 @@ SEARCH_BUTTON_KEY = "-SEARCH-BTN-"
 SEARCH_RESULTS_KEY = "-SEARCH-RESULTS-"
 ADD_QTY_KEY = "-ADD-QTY-"
 ADD_BUTTON_KEY = "-ADD-BTN-"
-
+REFRESH_TOTAL_AMOUNT = "-REFRESH-AMOUNT-"
 STOCK_TABLE_KEY = "-STOCK-TABLE-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
@@ -129,7 +129,14 @@ def _build_stock_section() -> list[list[sg.Element]]:
                 select_mode=sg.TABLE_SELECT_MODE_BROWSE,
                 num_rows=12,
             ),
-            sg.Button("Refresh", key=REFRESH_STOCK_KEY),
+            sg.Column(
+                [
+                    [sg.Button("Refresh", key=REFRESH_STOCK_KEY)],
+                    [sg.Button("Refresh Total", key=REFRESH_TOTAL_AMOUNT)],
+                    [sg.Text("Warning: may take a while\nwith a large stock")],
+                ],
+                pad=((10, 0), (0, 0)),
+            ),
         ],
         [sg.Text("Total stock value: 0.00 EUR", key=STOCK_TOTAL_VALUE_KEY)],
         [sg.Text("Top 5 most expensive cards:")],
@@ -340,12 +347,12 @@ def _stock_rows(cards: list[dict[str, object]]) -> list[list[str]]:
 def _as_float(value: object, default: float = 0.0) -> float:
     try:
         return float(str(value).strip().replace(",", "."))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
 def _stock_total_value(
-    cards: list[dict[str, object]]
+    cards: list[dict[str, object]],
 ) -> tuple[float, int, list[tuple[str, float]]]:
     total_value = 0.0
     missing_prices = 0
@@ -376,7 +383,7 @@ def _stock_total_value(
                     price_info = get_cardmarket_price_by_card_id(
                         card_id, display_code, allow_scrape=False
                     )
-                except (RuntimeError, ValueError):
+                except RuntimeError, ValueError:
                     _STOCK_PRICE_CACHE[cache_key] = None
                     missing_prices += 1
                     continue
@@ -406,6 +413,11 @@ def _stock_total_value(
 def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
     cards = list_collection()
     window[STOCK_TABLE_KEY].update(values=_stock_rows(cards))
+    return cards
+
+
+def _refresh_total(window: sg.Window):
+    cards = list_collection()
     total_value, missing_prices, top_five = _stock_total_value(cards)
     value_text = f"Total stock value: {total_value:.2f} EUR"
     if missing_prices > 0:
@@ -419,7 +431,6 @@ def _refresh_stock(window: sg.Window) -> list[dict[str, object]]:
         window[STOCK_TOP_FIVE_KEY].update("\n".join(lines))
     else:
         window[STOCK_TOP_FIVE_KEY].update("(No priced cards yet)")
-    return cards
 
 
 def _deck_rows(decks: list[dict[str, object]]) -> list[list[str]]:
@@ -530,7 +541,9 @@ def _refresh_selected_deck(
     return deck
 
 
-def _selected_deck_name(values: dict[str, object], decks: list[dict[str, object]]) -> str | None:
+def _selected_deck_name(
+    values: dict[str, object], decks: list[dict[str, object]]
+) -> str | None:
     row_index = _selected_table_index(values, DECK_LIST_KEY)
     if row_index is None or row_index < 0 or row_index >= len(decks):
         return None
@@ -538,7 +551,9 @@ def _selected_deck_name(values: dict[str, object], decks: list[dict[str, object]
 
 
 def _active_deck_name(
-    values: dict[str, object], decks: list[dict[str, object]], selected_deck_name: str | None
+    values: dict[str, object],
+    decks: list[dict[str, object]],
+    selected_deck_name: str | None,
 ) -> str | None:
     from_table = _selected_deck_name(values, decks)
     if from_table is not None:
@@ -581,7 +596,7 @@ def _open_stock_detail_popup(card: dict[str, object]) -> bool:
                     try:
                         price = get_cardmarket_price_by_card_id(card_id, display_code)
                         price_text = f"{price['price']} {price['currency']}"
-                    except (RuntimeError, ValueError):
+                    except RuntimeError, ValueError:
                         pass
                     rows.append(
                         [
@@ -664,11 +679,7 @@ def _open_stock_detail_popup(card: dict[str, object]) -> bool:
         if event in (remove_one_key, remove_set_key):
             row_index = _selected_table_index(detail_values, detail_sets_key)
             set_rows = _set_rows()
-            if (
-                row_index is None
-                or row_index < 0
-                or row_index >= len(set_rows)
-            ):
+            if row_index is None or row_index < 0 or row_index >= len(set_rows):
                 sg.popup_error("Select a print from the set list first.")
                 continue
             selected_set_code = str(set_rows[row_index][0])
@@ -733,12 +744,20 @@ def _open_deck_card_detail_popup(deck_name: str, deck_card: dict[str, object]) -
             image_element,
             sg.Column(
                 [
-                    [sg.Text(str(deck_card.get("name", "Unknown Card")), font=("Any", 14, "bold"))],
+                    [
+                        sg.Text(
+                            str(deck_card.get("name", "Unknown Card")),
+                            font=("Any", 14, "bold"),
+                        )
+                    ],
                     [sg.Text(str(deck_card.get("type", "Unknown Type")))],
                     [sg.Text(f"Card ID: {card_id}")],
                     [sg.Text(f"Section: {deck_card.get('section', 'main')}")],
                     [sg.Text(f"Quantity in Deck: {deck_card.get('quantity', 0)}")],
-                    [sg.Button("Remove 1", key=remove_one_key), sg.Button("Remove Card", key=remove_all_key)],
+                    [
+                        sg.Button("Remove 1", key=remove_one_key),
+                        sg.Button("Remove Card", key=remove_all_key),
+                    ],
                     [sg.Button("Close")],
                 ],
                 pad=(0, 0),
@@ -796,7 +815,9 @@ def _selected_stock_index(window: sg.Window, values: dict[str, object]) -> int |
     return None
 
 
-def _selected_deck_card_index(window: sg.Window, values: dict[str, object]) -> int | None:
+def _selected_deck_card_index(
+    window: sg.Window, values: dict[str, object]
+) -> int | None:
     row_index = _selected_table_index(values, DECK_CARDS_TABLE_KEY)
     if row_index is not None and row_index >= 0:
         return row_index
@@ -833,12 +854,12 @@ def main() -> None:
         if event == SEARCH_BUTTON_KEY:
             search_text = str(values.get(SEARCH_INPUT_KEY, "")).strip()
             if not search_text:
-                sg.popup_error(
-                    "Enter a set code, print code, or card name."
-                )
+                sg.popup_error("Enter a set code, print code, or card name.")
                 continue
             try:
-                resolved_identifier, _, cards = resolve_cards_for_identifier(search_text)
+                resolved_identifier, _, cards = resolve_cards_for_identifier(
+                    search_text
+                )
                 search_entries = _search_entries_for_set(resolved_identifier, cards)
                 window[SEARCH_RESULTS_KEY].update(values=_search_rows(search_entries))
             except (RuntimeError, ValueError) as exc:
@@ -849,8 +870,10 @@ def main() -> None:
                         raise ValueError(
                             f"Card '{search_text}' was found but has no printable set data."
                         )
-                    window[SEARCH_RESULTS_KEY].update(values=_search_rows(search_entries))
-                except (RuntimeError, ValueError):
+                    window[SEARCH_RESULTS_KEY].update(
+                        values=_search_rows(search_entries)
+                    )
+                except RuntimeError, ValueError:
                     sg.popup_error(str(exc))
             continue
 
@@ -911,6 +934,10 @@ def main() -> None:
 
         if event == REFRESH_STOCK_KEY:
             stock_cards = _refresh_stock(window)
+            continue
+
+        if event == REFRESH_TOTAL_AMOUNT:
+            _refresh_total(window)
             continue
 
         if event == DECK_REFRESH_BUTTON_KEY:
@@ -1053,11 +1080,16 @@ def main() -> None:
             if qty <= 0:
                 sg.popup_error("Quantity must be greater than 0.")
                 continue
-            selected_section = str(values.get(DECK_SECTION_INPUT_KEY, "auto")).strip().lower()
+            selected_section = (
+                str(values.get(DECK_SECTION_INPUT_KEY, "auto")).strip().lower()
+            )
             section_arg = None if selected_section in {"", "auto"} else selected_section
             try:
                 add_card_to_deck(
-                    selected_deck_name, card_identifier, quantity=qty, section=section_arg
+                    selected_deck_name,
+                    card_identifier,
+                    quantity=qty,
+                    section=section_arg,
                 )
                 _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 decks = _refresh_decks(window, selected_deck_name)
@@ -1073,7 +1105,9 @@ def main() -> None:
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
                 continue
-            deck = _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
+            deck = _refresh_selected_deck(
+                window, selected_deck_name, selected_deck_filter
+            )
             if deck is None:
                 sg.popup_error("Select a deck first.")
                 continue
@@ -1129,7 +1163,9 @@ def main() -> None:
             try:
                 changed = _open_deck_card_detail_popup(selected_deck_name, deck_card)
                 if changed:
-                    _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
+                    _refresh_selected_deck(
+                        window, selected_deck_name, selected_deck_filter
+                    )
                     decks = _refresh_decks(window, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
