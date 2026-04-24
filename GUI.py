@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import json
 import io
 from pathlib import Path
 from pricing import get_cardmarket_price_by_card_id
@@ -44,6 +46,8 @@ SEARCH_TAB_KEY = "-SEARCH-TAB-"
 STOCK_TAB_KEY = "-STOCK-TAB-"
 DECK_TAB_KEY = "-DECK-TAB-"
 SETTINGS_TAB_KEY = "-SETTINGS-TAB-"
+THEME_COMBO_KEY = "-THEME-COMBO-"
+THEME_APPLY_KEY = "-THEME-APPLY-"
 DECK_NAME_INPUT_KEY = "-DECK-NAME-"
 DECK_STATUS_INPUT_KEY = "-DECK-STATUS-"
 DECK_NOTES_INPUT_KEY = "-DECK-NOTES-"
@@ -66,6 +70,7 @@ DECK_CARDS_TABLE_KEY = "-DECK-CARDS-"
 DECK_CARDS_DOUBLE_CLICK_EVENT = f"{DECK_CARDS_TABLE_KEY}+DOUBLE-CLICK+"
 DECK_SECTION_TOTALS_KEY = "-DECK-SECTION-TOTALS-"
 IMAGE_CACHE_DIR = Path("cache/images")
+DEFAULT_SETTINGS_FILE = Path("cache/settings.json")
 _STOCK_PRICE_CACHE: dict[tuple[int, str], float | None] = {}
 
 
@@ -248,11 +253,28 @@ def _build_deck_section() -> list[list[sg.Element]]:
 
 
 def _build_settings_section() -> list[list[sg.Element]]:
+    available_themes = sg.theme_list()  # Gets all FreeSimpleGUI built-in themes
     return [
+        [sg.Text("Theme:")],
         [
-            sg.Text("This is the app Settings (Soon)"),
-        ]
+            sg.Combo(
+                values=available_themes,
+                default_value="DarkAmber",  # Match what's set in main()
+                readonly=True,
+                key=THEME_COMBO_KEY,
+                size=(30, 1),
+            ),
+            sg.Button("Apply Theme", key=THEME_APPLY_KEY),
+        ],
+        [sg.Text("Note: applying a theme will restart the window.", text_color="gray")],
     ]
+
+
+def _save_settings(settings: dict, settings_path: Path = DEFAULT_SETTINGS_FILE) -> None:
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(settings, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _layout() -> list[list[sg.Element]]:
@@ -850,8 +872,16 @@ def _selected_deck_card_index(
 
 
 def main() -> None:
-    sg.theme("DarkAmber")
+    if not DEFAULT_SETTINGS_FILE.exists():
+        sg.theme("DarkAmber")
+        DEFAULT_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DEFAULT_SETTINGS_FILE.write_text(
+            json.dumps({"theme": "DarkAmber"}, sort_keys=True), encoding="utf-8"
+        )
 
+    raw = DEFAULT_SETTINGS_FILE.read_text(encoding="utf-8")
+    settings = json.loads(raw)
+    sg.theme(settings["theme"])
     window = sg.Window("Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True)
     window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
     window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
@@ -867,6 +897,29 @@ def main() -> None:
 
         if event == sg.WIN_CLOSED:
             break
+
+        if event == THEME_APPLY_KEY:
+            chosen_theme = str(values.get(THEME_COMBO_KEY, "DarkAmber")).strip()
+            if chosen_theme not in sg.theme_list():
+                sg.popup_error("Invalid theme selected.")
+                continue
+
+            settings = {"theme": chosen_theme}
+            _save_settings(settings)
+
+            sg.theme(chosen_theme)
+            window.close()
+
+            window = sg.Window(
+                "Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True
+            )
+            window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+            window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+
+            stock_cards = _refresh_stock(window)
+            decks = _refresh_decks(window, selected_deck_name)
+            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
+            continue
 
         if event == SEARCH_BUTTON_KEY:
             search_text = str(values.get(SEARCH_INPUT_KEY, "")).strip()
