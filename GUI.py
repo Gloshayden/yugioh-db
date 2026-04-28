@@ -181,9 +181,9 @@ def _build_deck_section() -> list[list[sg.Element]]:
         [
             sg.Table(
                 values=[],
-                headings=["Deck", "Status", "Cards", "Unique"],
+                headings=["Deck", "Status", "Cards", "Unique", "Stock"],
                 auto_size_columns=False,
-                col_widths=[24, 10, 8, 8],
+                col_widths=[24, 10, 8, 8, 8],
                 key=DECK_LIST_KEY,
                 enable_events=True,
                 justification="left",
@@ -472,7 +472,33 @@ def _refresh_total(window: sg.Window):
         window[STOCK_TOP_FIVE_KEY].update("(No priced cards yet)")
 
 
-def _deck_rows(decks: list[dict[str, object]]) -> list[list[str]]:
+def _deck_stock_count(
+    deck: dict[str, object], stock_cards: list[dict[str, object]]
+) -> int:
+    """Calculate how many cards from the deck are in stock."""
+    stock_count = 0
+    deck_cards = deck.get("cards")
+    if not isinstance(deck_cards, dict):
+        return 0
+
+    for stock_card in stock_cards:
+        card_id = _safe_int(stock_card.get("card_id"), -1)
+        if card_id < 0:
+            continue
+        sets = stock_card.get("sets")
+        if not isinstance(sets, dict):
+            continue
+        if any(_safe_int(s.get("quantity"), 0) > 0 for s in sets.values()):
+            for deck_card in deck_cards.values():
+                if _safe_int(deck_card.get("card_id"), -1) == card_id:
+                    stock_count += 1
+                    break
+    return stock_count
+
+
+def _deck_rows(
+    decks: list[dict[str, object]], stock_cards: list[dict[str, object]]
+) -> list[list[str]]:
     rows: list[list[str]] = []
     for deck in decks:
         rows.append(
@@ -481,6 +507,7 @@ def _deck_rows(decks: list[dict[str, object]]) -> list[list[str]]:
                 str(deck.get("status", "future")),
                 str(_safe_int(deck.get("total_cards"), 0)),
                 str(_safe_int(deck.get("unique_cards"), 0)),
+                str(_deck_stock_count(deck, stock_cards)),
             ]
         )
     return rows
@@ -494,7 +521,7 @@ def _deck_card_rows(
     cards = deck.get("cards")
     if not isinstance(cards, dict):
         return []
-    
+
     stock_by_id: dict[int, int] = {}
     if stock_cards:
         for stock_card in stock_cards:
@@ -506,7 +533,7 @@ def _deck_card_rows(
                 continue
             total_qty = sum(_safe_int(s.get("quantity"), 0) for s in sets.values())
             stock_by_id[card_id] = total_qty
-    
+
     selected_filter = section_filter.strip().lower()
     rows: list[list[str]] = []
     for card in sorted(
@@ -569,10 +596,12 @@ def _select_deck_row(window: sg.Window, deck_row_index: int) -> None:
 
 
 def _refresh_decks(
-    window: sg.Window, selected_deck_name: str | None = None
+    window: sg.Window,
+    stock_cards: list[dict[str, object]],
+    selected_deck_name: str | None = None,
 ) -> list[dict[str, object]]:
     decks = list_decks()
-    window[DECK_LIST_KEY].update(values=_deck_rows(decks))
+    window[DECK_LIST_KEY].update(values=_deck_rows(decks, stock_cards))
     if selected_deck_name is not None and selected_deck_name.strip() != "":
         target_name = selected_deck_name.strip().casefold()
         for index, deck in enumerate(decks):
@@ -911,7 +940,7 @@ def main() -> None:
 
     search_entries: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
-    decks = _refresh_decks(window)
+    decks = _refresh_decks(window, stock_cards)
     selected_deck_name: str | None = None
     selected_deck_filter = "all"
 
@@ -941,7 +970,11 @@ def main() -> None:
 
             stock_cards = _refresh_stock(window)
             decks = _refresh_decks(window, selected_deck_name)
-            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+            _refresh_selected_deck(
+                window, selected_deck_name, selected_deck_filter, stock_cards
+            )
+            decks = _refresh_decks(window, stock_cards, selected_deck_name)
+            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             continue
 
         if event == SEARCH_BUTTON_KEY:
@@ -1037,17 +1070,26 @@ def main() -> None:
             selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             selected_deck_filter = _active_deck_filter(values, selected_deck_filter)
             decks = _refresh_decks(window, selected_deck_name)
-            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+            _refresh_selected_deck(
+                window, selected_deck_name, selected_deck_filter, stock_cards
+            )
+            stock_cards = _refresh_stock(window)
+            decks = _refresh_decks(window, stock_cards, selected_deck_name)
+            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             continue
 
         if event == DECK_LIST_KEY:
             selected_deck_name = _selected_deck_name(values, decks)
-            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+            _refresh_selected_deck(
+                window, selected_deck_name, selected_deck_filter, stock_cards
+            )
             continue
 
         if event == DECK_CARD_FILTER_KEY:
             selected_deck_filter = _active_deck_filter(values, selected_deck_filter)
-            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+            _refresh_selected_deck(
+                window, selected_deck_name, selected_deck_filter, stock_cards
+            )
             continue
 
         if event == DECK_CREATE_BUTTON_KEY:
@@ -1061,7 +1103,12 @@ def main() -> None:
                 create_deck(deck_name, status=status, notes=notes)
                 selected_deck_name = deck_name
                 decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+                _refresh_selected_deck(
+                    window, selected_deck_name, selected_deck_filter, stock_cards
+                )
+                stock_cards = _refresh_stock(window)
+                decks = _refresh_decks(window, stock_cards, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 sg.popup_no_titlebar(
                     "Deck created.", auto_close=True, auto_close_duration=1.2
                 )
@@ -1078,7 +1125,12 @@ def main() -> None:
             try:
                 set_deck_status(selected_deck_name, status)
                 decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+                _refresh_selected_deck(
+                    window, selected_deck_name, selected_deck_filter, stock_cards
+                )
+                stock_cards = _refresh_stock(window)
+                decks = _refresh_decks(window, stock_cards, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
@@ -1108,7 +1160,12 @@ def main() -> None:
                 )
                 selected_deck_name = target_deck_name
                 decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+                _refresh_selected_deck(
+                    window, selected_deck_name, selected_deck_filter, stock_cards
+                )
+                stock_cards = _refresh_stock(window)
+                decks = _refresh_decks(window, stock_cards, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 window[DECK_NAME_INPUT_KEY].update(value=selected_deck_name)
                 sg.popup_no_titlebar(
                     "Deck imported from YDK.", auto_close=True, auto_close_duration=1.2
@@ -1153,9 +1210,12 @@ def main() -> None:
                 continue
             try:
                 delete_deck(selected_deck_name)
-                decks = _refresh_decks(window)
+                stock_cards = _refresh_stock(window)
+                decks = _refresh_decks(window, stock_cards)
                 selected_deck_name = None
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+                _refresh_selected_deck(
+                    window, selected_deck_name, selected_deck_filter, stock_cards
+                )
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
@@ -1184,8 +1244,13 @@ def main() -> None:
                     quantity=qty,
                     section=section_arg,
                 )
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+                _refresh_selected_deck(
+                    window, selected_deck_name, selected_deck_filter, stock_cards
+                )
                 decks = _refresh_decks(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
+                stock_cards = _refresh_stock(window)
+                decks = _refresh_decks(window, stock_cards, selected_deck_name)
                 sg.popup_no_titlebar(
                     "Card added to deck.", auto_close=True, auto_close_duration=1.2
                 )
@@ -1219,8 +1284,13 @@ def main() -> None:
                     remove_all=(event == DECK_REMOVE_ALL_BUTTON_KEY),
                     section=section,
                 )
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter, stock_cards)
+                _refresh_selected_deck(
+                    window, selected_deck_name, selected_deck_filter, stock_cards
+                )
                 decks = _refresh_decks(window, selected_deck_name)
+                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
+                stock_cards = _refresh_stock(window)
+                decks = _refresh_decks(window, stock_cards, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
@@ -1259,7 +1329,8 @@ def main() -> None:
                     _refresh_selected_deck(
                         window, selected_deck_name, selected_deck_filter
                     )
-                    decks = _refresh_decks(window, selected_deck_name)
+                    stock_cards = _refresh_stock(window)
+                    decks = _refresh_decks(window, stock_cards, selected_deck_name)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
