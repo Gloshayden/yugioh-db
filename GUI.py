@@ -37,6 +37,7 @@ ADD_QTY_KEY = "-ADD-QTY-"
 ADD_BUTTON_KEY = "-ADD-BTN-"
 REFRESH_TOTAL_AMOUNT = "-REFRESH-AMOUNT-"
 STOCK_TABLE_KEY = "-STOCK-TABLE-"
+STOCK_SEARCH_KEY = "-STOCK-SEARCH-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
 STOCK_TOTAL_VALUE_KEY = "-STOCK-TOTAL-VALUE-"
@@ -123,6 +124,10 @@ def _build_search_section() -> list[list[sg.Element]]:
 def _build_stock_section() -> list[list[sg.Element]]:
     return [
         [sg.Text("My Stock (double-click a row for details)")],
+        [
+            sg.Text("Search:"),
+            sg.Input(key=STOCK_SEARCH_KEY, size=(25, 1), enable_events=True),
+        ],
         [
             sg.Table(
                 values=[],
@@ -366,9 +371,15 @@ def _search_entries_for_card_name(card: dict[str, object]) -> list[dict[str, obj
     return entries
 
 
-def _stock_rows(cards: list[dict[str, object]]) -> list[list[str]]:
+def _stock_rows(
+    cards: list[dict[str, object]], search_query: str = ""
+) -> list[list[str]]:
     rows: list[list[str]] = []
+    search_lower = search_query.strip().lower()
     for card in cards:
+        card_name = str(card.get("name", "Unknown Card")).lower()
+        if search_lower and search_lower not in card_name:
+            continue
         rows.append(
             [
                 str(card.get("name", "Unknown Card")),
@@ -1060,6 +1071,14 @@ def main() -> None:
 
         if event == REFRESH_STOCK_KEY:
             stock_cards = _refresh_stock(window)
+            window[STOCK_SEARCH_KEY].update(value="")
+            continue
+
+        if event == STOCK_SEARCH_KEY:
+            search_query = str(values.get(STOCK_SEARCH_KEY, "")).strip()
+            window[STOCK_TABLE_KEY].update(
+                values=_stock_rows(stock_cards, search_query)
+            )
             continue
 
         if event == REFRESH_TOTAL_AMOUNT:
