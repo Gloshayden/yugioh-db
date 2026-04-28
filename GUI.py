@@ -27,6 +27,7 @@ from core import (
     remove_card_from_collection,
     remove_card_from_deck,
     resolve_cards_for_identifier,
+    search_cards_by_name,
     set_deck_status,
 )
 
@@ -309,6 +310,11 @@ def _safe_int(value: object, default: int = 0) -> int:
         return int(value)
     except TypeError, ValueError:
         return default
+
+
+def _fuzzy_match(query: str, target: str) -> bool:
+    """Check if query matches target (case-insensitive substring)."""
+    return query.lower() in target.lower()
 
 
 def _search_rows(search_entries: list[dict[str, object]]) -> list[list[str]]:
@@ -1008,8 +1014,22 @@ def main() -> None:
                     window[SEARCH_RESULTS_KEY].update(
                         values=_search_rows(search_entries)
                     )
-                except RuntimeError, ValueError:
-                    sg.popup_error(str(exc))
+                except (RuntimeError, ValueError):
+                    cards = search_cards_by_name(search_text)
+                    if cards:
+                        search_entries = [
+                            {
+                                "card": card,
+                                "set_identifier": str(card.get("name", "")),
+                                "display_code": str(card.get("name", "")),
+                            }
+                            for card in cards
+                        ]
+                        window[SEARCH_RESULTS_KEY].update(
+                            values=_search_rows(search_entries)
+                        )
+                    else:
+                        sg.popup_error(f"Could not find card: {search_text}")
             continue
 
         if event == ADD_BUTTON_KEY:
@@ -1244,7 +1264,7 @@ def main() -> None:
                 continue
             card_identifier = str(values.get(DECK_CARD_INPUT_KEY, "")).strip()
             if card_identifier == "":
-                sg.popup_error("Enter a card ID or exact card name.")
+                sg.popup_error("Enter a card ID or card name.")
                 continue
             qty = _safe_int(values.get(DECK_QTY_INPUT_KEY), 0)
             if qty <= 0:
@@ -1264,8 +1284,6 @@ def main() -> None:
                 _refresh_selected_deck(
                     window, selected_deck_name, selected_deck_filter, stock_cards
                 )
-                decks = _refresh_decks(window, selected_deck_name)
-                _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
                 stock_cards = _refresh_stock(window)
                 decks = _refresh_decks(window, stock_cards, selected_deck_name)
                 sg.popup_no_titlebar(

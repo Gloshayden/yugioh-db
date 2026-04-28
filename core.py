@@ -98,6 +98,24 @@ def get_card_by_name(card_name: str) -> dict[str, object]:
     return card
 
 
+def search_cards_by_name(query: str, limit: int = 10) -> list[dict[str, object]]:
+    """Search for cards by partial name match."""
+    query_lower = query.strip().lower()
+    if not query_lower:
+        return []
+    try:
+        encoded_query = quote(query_lower)
+        data = fetch_json(f"{API_BASE}/cardinfo.php?fname={encoded_query}")
+        if not isinstance(data, dict):
+            return []
+        cards = data.get("data")
+        if not isinstance(cards, list):
+            return []
+        return [c for c in cards if isinstance(c, dict)][:limit]
+    except Exception:
+        return []
+
+
 def _is_int_text(value: str) -> bool:
     text = value.strip()
     return text != "" and text.lstrip("-").isdigit()
