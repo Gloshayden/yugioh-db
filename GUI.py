@@ -980,12 +980,10 @@ def main() -> None:
             window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
 
             stock_cards = _refresh_stock(window)
-            decks = _refresh_decks(window, selected_deck_name)
+            decks = _refresh_decks(window, stock_cards, selected_deck_name)
             _refresh_selected_deck(
                 window, selected_deck_name, selected_deck_filter, stock_cards
             )
-            decks = _refresh_decks(window, stock_cards, selected_deck_name)
-            _refresh_selected_deck(window, selected_deck_name, selected_deck_filter)
             continue
 
         if event == SEARCH_BUTTON_KEY:
