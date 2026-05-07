@@ -41,6 +41,7 @@ STOCK_TABLE_KEY = "-STOCK-TABLE-"
 STOCK_SEARCH_KEY = "-STOCK-SEARCH-"
 REFRESH_STOCK_KEY = "-REFRESH-STOCK-"
 STOCK_DOUBLE_CLICK_EVENT = f"{STOCK_TABLE_KEY}+DOUBLE-CLICK+"
+SEARCH_DOUBLE_CLICK_EVENT = f"{SEARCH_RESULTS_KEY}+DOUBLE-CLICK+"
 STOCK_TOTAL_VALUE_KEY = "-STOCK-TOTAL-VALUE-"
 STOCK_TOP_FIVE_KEY = "-STOCK-TOP-FIVE-"
 MAIN_TABS_KEY = "-MAIN-TABS-"
@@ -954,6 +955,7 @@ def main() -> None:
     window = sg.Window("Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True)
     window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
     window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+    window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
 
     search_entries: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
@@ -984,6 +986,7 @@ def main() -> None:
             )
             window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+            window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
 
             stock_cards = _refresh_stock(window)
             decks = _refresh_decks(window, stock_cards, selected_deck_name)
@@ -1014,7 +1017,7 @@ def main() -> None:
                     window[SEARCH_RESULTS_KEY].update(
                         values=_search_rows(search_entries)
                     )
-                except (RuntimeError, ValueError):
+                except RuntimeError, ValueError:
                     cards = search_cards_by_name(search_text)
                     if cards:
                         search_entries = [
@@ -1380,6 +1383,20 @@ def main() -> None:
                     stock_cards = _refresh_stock(window)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
+            continue
+
+        if event == SEARCH_DOUBLE_CLICK_EVENT:
+            row_index = _selected_table_index(values, SEARCH_RESULTS_KEY)
+            if row_index is None or row_index < 0 or row_index >= len(search_entries):
+                continue
+            try:
+                search_entry = search_entries[row_index]
+                card = search_entry.get("card")
+                if isinstance(card, dict):
+                    changed = _open_stock_detail_popup(card)
+            except (RuntimeError, ValueError) as exc:
+                sg.popup_error(str(exc))
+            continue
 
     window.close()
 
