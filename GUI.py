@@ -1391,11 +1391,16 @@ def main() -> None:
                 continue
             try:
                 search_entry = search_entries[row_index]
-                card = search_entry.get("card")
-                if isinstance(card, dict):
-                    card_with_id = dict(card)
-                    card_with_id["card_id"] = card.get("id", -1)
-                    changed = _open_stock_detail_popup(card_with_id)
+                card_id = _safe_int(search_entry.get("card", {}).get("id"), -1)
+                if card_id > 0:
+                    stock_card = next(
+                        (c for c in stock_cards if _safe_int(c.get("card_id")) == card_id),
+                        None,
+                    )
+                    if stock_card:
+                        changed = _open_stock_detail_popup(stock_card)
+                    else:
+                        sg.popup_error("Card not in collection yet.")
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
