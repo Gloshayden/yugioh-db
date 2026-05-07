@@ -1393,7 +1393,9 @@ def main() -> None:
                 search_entry = search_entries[row_index]
                 card = search_entry.get("card")
                 if isinstance(card, dict):
-                    changed = _open_stock_detail_popup(card)
+                    card_with_id = dict(card)
+                    card_with_id["card_id"] = card.get("id", -1)
+                    changed = _open_stock_detail_popup(card_with_id)
             except (RuntimeError, ValueError) as exc:
                 sg.popup_error(str(exc))
             continue
