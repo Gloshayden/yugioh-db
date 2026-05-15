@@ -77,6 +77,7 @@ DECK_SECTION_TOTALS_KEY = "-DECK-SECTION-TOTALS-"
 IMAGE_CACHE_DIR = Path("cache/images")
 DEFAULT_SETTINGS_FILE = Path("cache/settings.json")
 _STOCK_PRICE_CACHE: dict[tuple[int, str], float | None] = {}
+DETAIL_IMAGE_MAX_SIZE = (340, 440)
 
 
 def _card_stats_text(card: dict[str, object]) -> str:
@@ -712,9 +713,12 @@ def _open_stock_detail_popup(card: dict[str, object], card_quality: str) -> bool
     remove_set_key = "-DETAIL-REMOVE-SET-"
     delete_card_key = "-DETAIL-DELETE-CARD-"
 
-    def _image_data_for_gui(image_path: Path) -> bytes:
+    def _image_data_for_gui(
+        image_path: Path, max_size: tuple[int, int] = DETAIL_IMAGE_MAX_SIZE
+    ) -> bytes:
         with Image.open(image_path) as image:
             rgb_image = image.convert("RGB")
+            rgb_image.thumbnail(max_size, Image.Resampling.LANCZOS)
             buffer = io.BytesIO()
             rgb_image.save(buffer, format="PNG")
             return buffer.getvalue()
@@ -861,9 +865,12 @@ def _open_deck_card_detail_popup(
     remove_one_key = "-DECK-DETAIL-REMOVE-ONE-"
     remove_all_key = "-DECK-DETAIL-REMOVE-ALL-"
 
-    def _image_data_for_gui(image_path: Path) -> bytes:
+    def _image_data_for_gui(
+        image_path: Path, max_size: tuple[int, int] = DETAIL_IMAGE_MAX_SIZE
+    ) -> bytes:
         with Image.open(image_path) as image:
             rgb_image = image.convert("RGB")
+            rgb_image.thumbnail(max_size, Image.Resampling.LANCZOS)
             buffer = io.BytesIO()
             rgb_image.save(buffer, format="PNG")
             return buffer.getvalue()
@@ -1017,7 +1024,9 @@ def main() -> None:
             card_quality = chosen_quality
             settings = {"theme": settings["theme"], "quality": card_quality}
             _save_settings(settings)
-            window[QUALITY_COMBO_KEY].update(value=_quality_setting_to_choice(card_quality))
+            window[QUALITY_COMBO_KEY].update(
+                value=_quality_setting_to_choice(card_quality)
+            )
             continue
 
         if event == THEME_APPLY_KEY:
@@ -1038,7 +1047,9 @@ def main() -> None:
             window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
-            window[QUALITY_COMBO_KEY].update(value=_quality_setting_to_choice(card_quality))
+            window[QUALITY_COMBO_KEY].update(
+                value=_quality_setting_to_choice(card_quality)
+            )
 
             stock_cards = _refresh_stock(window)
             decks = _refresh_decks(window, stock_cards, selected_deck_name)
@@ -1432,9 +1443,7 @@ def main() -> None:
             if row_index is None or row_index < 0 or row_index >= len(stock_cards):
                 continue
             try:
-                changed = _open_stock_detail_popup(
-                    stock_cards[row_index], card_quality
-                )
+                changed = _open_stock_detail_popup(stock_cards[row_index], card_quality)
                 if changed:
                     stock_cards = _refresh_stock(window)
             except (RuntimeError, ValueError) as exc:
