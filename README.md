@@ -145,6 +145,6 @@ Core app logic now lives in `core.py` so a GUI can import it directly:
 - `add_card_to_collection(set_identifier, card_id, quantity)`
 - `list_collection()`
 - `remove_card_from_collection(card_id, set_code=None, quantity=1, remove_all=False)`
-- `cache_low_res_card_image(card_id)` saves to `cache/images/{card_id}.jpg` (or source image extension)
+- `cache_low_res_card_image(card_id, quality="small")` saves to `cache/images/<quality>/{card_id}.jpg` (or source image extension)
 - `get_cardmarket_price_by_card_id(card_id, set_code=None)` from `pricing.py`
 - deck helpers: `create_deck`, `list_decks`, `get_deck`, `add_card_to_deck`, `remove_card_from_deck`, `set_deck_status`, `delete_deck`, `import_deck_from_ydk`, `export_deck_to_ydk`

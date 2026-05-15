@@ -51,6 +51,8 @@ DECK_TAB_KEY = "-DECK-TAB-"
 SETTINGS_TAB_KEY = "-SETTINGS-TAB-"
 THEME_COMBO_KEY = "-THEME-COMBO-"
 THEME_APPLY_KEY = "-THEME-APPLY-"
+QUALITY_COMBO_KEY = "-QUALITY-COMBO-"
+QUALITY_APPLY_KEY = "-QUALITY-APPLY-"
 DECK_NAME_INPUT_KEY = "-DECK-NAME-"
 DECK_STATUS_INPUT_KEY = "-DECK-STATUS-"
 DECK_NOTES_INPUT_KEY = "-DECK-NOTES-"
@@ -260,6 +262,7 @@ def _build_deck_section() -> list[list[sg.Element]]:
 
 
 def _build_settings_section() -> list[list[sg.Element]]:
+    quality_list = ["small", "large"]
     available_themes = sg.theme_list()  # Gets all FreeSimpleGUI built-in themes
     return [
         [sg.Text("Theme:")],
@@ -274,6 +277,17 @@ def _build_settings_section() -> list[list[sg.Element]]:
             sg.Button("Apply Theme", key=THEME_APPLY_KEY),
         ],
         [sg.Text("Note: applying a theme will restart the window.", text_color="gray")],
+        [sg.Text("Image quality:")],
+        [
+            sg.Combo(
+                values=quality_list,
+                default_value="small",  # Match what's set in main()
+                readonly=True,
+                key=QUALITY_COMBO_KEY,
+                size=(30, 1),
+            ),
+            sg.Button("Apply quality", key=QUALITY_APPLY_KEY),
+        ],
     ]
 
 
@@ -311,6 +325,17 @@ def _safe_int(value: object, default: int = 0) -> int:
         return int(value)
     except TypeError, ValueError:
         return default
+
+
+def _quality_setting_to_choice(value: object) -> str:
+    normalized = str(value).strip().lower()
+    if normalized in {"cards", "large"}:
+        return "large"
+    return "small"
+
+
+def _quality_choice_to_setting(value: object) -> str:
+    return "cards" if _quality_setting_to_choice(value) == "large" else "cards_small"
 
 
 def _fuzzy_match(query: str, target: str) -> bool:
@@ -677,7 +702,7 @@ def _active_deck_filter(values: dict[str, object], selected_filter: str) -> str:
     return selected_filter
 
 
-def _open_stock_detail_popup(card: dict[str, object]) -> bool:
+def _open_stock_detail_popup(card: dict[str, object], card_quality: str) -> bool:
     card_id = _safe_int(card.get("card_id"), -1)
     if card_id < 0:
         raise ValueError("Selected card does not have a valid card id.")
@@ -761,7 +786,11 @@ def _open_stock_detail_popup(card: dict[str, object]) -> bool:
 
     image_element: sg.Element
     try:
-        image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
+        image_path = cache_low_res_card_image(
+            card_id,
+            photos_dir=IMAGE_CACHE_DIR / card_quality,
+            quality=card_quality,
+        )
         image_element = sg.Image(
             data=_image_data_for_gui(image_path), pad=((0, 14), (0, 0))
         )
@@ -822,7 +851,9 @@ def _open_stock_detail_popup(card: dict[str, object]) -> bool:
     return changed
 
 
-def _open_deck_card_detail_popup(deck_name: str, deck_card: dict[str, object]) -> bool:
+def _open_deck_card_detail_popup(
+    deck_name: str, deck_card: dict[str, object], card_quality: str
+) -> bool:
     card_id = _safe_int(deck_card.get("card_id"), -1)
     if card_id < 0:
         raise ValueError("Selected deck card does not have a valid card id.")
@@ -839,7 +870,11 @@ def _open_deck_card_detail_popup(deck_name: str, deck_card: dict[str, object]) -
 
     image_element: sg.Element
     try:
-        image_path = cache_low_res_card_image(card_id, photos_dir=IMAGE_CACHE_DIR)
+        image_path = cache_low_res_card_image(
+            card_id,
+            photos_dir=IMAGE_CACHE_DIR / card_quality,
+            quality=card_quality,
+        )
         image_element = sg.Image(
             data=_image_data_for_gui(image_path), pad=((0, 14), (0, 0))
         )
@@ -946,16 +981,22 @@ def main() -> None:
         sg.theme("DarkAmber")
         DEFAULT_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         DEFAULT_SETTINGS_FILE.write_text(
-            json.dumps({"theme": "DarkAmber"}, sort_keys=True), encoding="utf-8"
+            json.dumps(
+                {"theme": "DarkAmber", "quality": "cards_small"}, sort_keys=True
+            ),
+            encoding="utf-8",
         )
 
     raw = DEFAULT_SETTINGS_FILE.read_text(encoding="utf-8")
     settings = json.loads(raw)
     sg.theme(settings["theme"])
+    card_quality = _quality_choice_to_setting(settings.get("quality", "small"))
+    quality_choice = _quality_setting_to_choice(card_quality)
     window = sg.Window("Yu-Gi-Oh Collection", _layout(), finalize=True, resizable=True)
     window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
     window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
     window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+    window[QUALITY_COMBO_KEY].update(value=quality_choice)
 
     search_entries: list[dict[str, object]] = []
     stock_cards = _refresh_stock(window)
@@ -969,13 +1010,23 @@ def main() -> None:
         if event == sg.WIN_CLOSED:
             break
 
+        if event == QUALITY_APPLY_KEY:
+            chosen_quality = _quality_choice_to_setting(
+                values.get(QUALITY_COMBO_KEY, "small")
+            )
+            card_quality = chosen_quality
+            settings = {"theme": settings["theme"], "quality": card_quality}
+            _save_settings(settings)
+            window[QUALITY_COMBO_KEY].update(value=_quality_setting_to_choice(card_quality))
+            continue
+
         if event == THEME_APPLY_KEY:
             chosen_theme = str(values.get(THEME_COMBO_KEY, "DarkAmber")).strip()
             if chosen_theme not in sg.theme_list():
                 sg.popup_error("Invalid theme selected.")
                 continue
 
-            settings = {"theme": chosen_theme}
+            settings = {"theme": chosen_theme, "quality": card_quality}
             _save_settings(settings)
 
             sg.theme(chosen_theme)
@@ -987,6 +1038,7 @@ def main() -> None:
             window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+            window[QUALITY_COMBO_KEY].update(value=_quality_setting_to_choice(card_quality))
 
             stock_cards = _refresh_stock(window)
             decks = _refresh_decks(window, stock_cards, selected_deck_name)
@@ -1362,7 +1414,9 @@ def main() -> None:
             if deck_card is None:
                 continue
             try:
-                changed = _open_deck_card_detail_popup(selected_deck_name, deck_card)
+                changed = _open_deck_card_detail_popup(
+                    selected_deck_name, deck_card, card_quality
+                )
                 if changed:
                     _refresh_selected_deck(
                         window, selected_deck_name, selected_deck_filter
@@ -1378,7 +1432,9 @@ def main() -> None:
             if row_index is None or row_index < 0 or row_index >= len(stock_cards):
                 continue
             try:
-                changed = _open_stock_detail_popup(stock_cards[row_index])
+                changed = _open_stock_detail_popup(
+                    stock_cards[row_index], card_quality
+                )
                 if changed:
                     stock_cards = _refresh_stock(window)
             except (RuntimeError, ValueError) as exc:
@@ -1394,11 +1450,15 @@ def main() -> None:
                 card_id = _safe_int(search_entry.get("card", {}).get("id"), -1)
                 if card_id > 0:
                     stock_card = next(
-                        (c for c in stock_cards if _safe_int(c.get("card_id")) == card_id),
+                        (
+                            c
+                            for c in stock_cards
+                            if _safe_int(c.get("card_id")) == card_id
+                        ),
                         None,
                     )
                     if stock_card:
-                        changed = _open_stock_detail_popup(stock_card)
+                        changed = _open_stock_detail_popup(stock_card, card_quality)
                     else:
                         sg.popup_error("Card not in collection yet.")
             except (RuntimeError, ValueError) as exc:

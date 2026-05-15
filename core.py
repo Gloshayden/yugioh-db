@@ -200,6 +200,7 @@ def resolve_saved_card_id(
 def cache_low_res_card_image(
     card_id: int,
     photos_dir: Path = DEFAULT_PHOTOS_DIR,
+    quality: str = "small",
     overwrite: bool = False,
 ) -> Path:
     card = get_card_by_id(card_id)
@@ -211,7 +212,11 @@ def cache_low_res_card_image(
     if not isinstance(image_info, dict):
         raise RuntimeError("Unexpected card image data format.")
 
-    image_url = image_info.get("image_url_small") or image_info.get("image_url")
+    normalized_quality = quality.strip().lower()
+    if normalized_quality in {"small", "cards_small"}:
+        image_url = image_info.get("image_url_small") or image_info.get("image_url")
+    else:
+        image_url = image_info.get("image_url") or image_info.get("image_url_small")
     if not isinstance(image_url, str) or image_url.strip() == "":
         raise ValueError(f"Card id '{card_id}' does not include a valid image URL.")
 
