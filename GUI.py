@@ -1027,6 +1027,7 @@ def main() -> None:
             window[QUALITY_COMBO_KEY].update(
                 value=_quality_setting_to_choice(card_quality)
             )
+            sg.popup("Changed image quality")
             continue
 
         if event == THEME_APPLY_KEY:
