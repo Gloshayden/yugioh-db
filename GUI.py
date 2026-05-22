@@ -1003,6 +1003,9 @@ def main() -> None:
     window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
     window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
     window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+    window[SEARCH_INPUT_KEY].bind("<Return>", "_Enter")
+    window[DECK_NAME_INPUT_KEY].bind("<Return>", "_Enter")
+    window[DECK_CARD_INPUT_KEY].bind("<Return>", "_Enter")
     window[QUALITY_COMBO_KEY].update(value=quality_choice)
 
     search_entries: list[dict[str, object]] = []
@@ -1048,6 +1051,7 @@ def main() -> None:
             window[STOCK_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[DECK_CARDS_TABLE_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
             window[SEARCH_RESULTS_KEY].bind("<Double-1>", "+DOUBLE-CLICK+")
+            window[SEARCH_INPUT_KEY].bind("<Return>", "_Enter")
             window[QUALITY_COMBO_KEY].update(
                 value=_quality_setting_to_choice(card_quality)
             )
@@ -1059,7 +1063,7 @@ def main() -> None:
             )
             continue
 
-        if event == SEARCH_BUTTON_KEY:
+        if event == SEARCH_BUTTON_KEY or event == f"{SEARCH_INPUT_KEY}_Enter":
             search_text = str(values.get(SEARCH_INPUT_KEY, "")).strip()
             if not search_text:
                 sg.popup_error("Enter a set code, print code, or card name.")
@@ -1196,7 +1200,7 @@ def main() -> None:
             )
             continue
 
-        if event == DECK_CREATE_BUTTON_KEY:
+        if event == DECK_CREATE_BUTTON_KEY or event == f"{DECK_NAME_INPUT_KEY}_Enter":
             deck_name = str(values.get(DECK_NAME_INPUT_KEY, "")).strip()
             status = str(values.get(DECK_STATUS_INPUT_KEY, "future")).strip().lower()
             notes = str(values.get(DECK_NOTES_INPUT_KEY, "")).strip()
@@ -1324,7 +1328,7 @@ def main() -> None:
                 sg.popup_error(str(exc))
             continue
 
-        if event == DECK_ADD_CARD_BUTTON_KEY:
+        if event == DECK_ADD_CARD_BUTTON_KEY or event == f"{DECK_CARD_INPUT_KEY}_Enter":
             selected_deck_name = _active_deck_name(values, decks, selected_deck_name)
             if selected_deck_name is None:
                 sg.popup_error("Select a deck first.")
