@@ -4,7 +4,7 @@ import os
 import json
 import io
 from pathlib import Path
-from pricing import get_cardmarket_price_by_card_id
+from pricing import get_cardmarket_price_by_card_id, get_cardmarket_prices
 import FreeSimpleGUI as sg
 from PIL import Image
 
@@ -436,6 +436,8 @@ def _stock_total_value(
     missing_prices = 0
     card_totals: dict[int, float] = {}
     card_names: dict[int, str] = {}
+    pending_requests: list[tuple[int, str]] = []
+    pending_quantities: dict[tuple[int, str], int] = {}
     for card in cards:
         card_id = _safe_int(card.get("card_id"), -1)
         if card_id < 0:
@@ -457,22 +459,31 @@ def _stock_total_value(
                 missing_prices += 1
                 continue
             if price is None:
-                try:
-                    price_info = get_cardmarket_price_by_card_id(
-                        card_id, display_code, allow_scrape=False
-                    )
-                except RuntimeError, ValueError:
-                    _STOCK_PRICE_CACHE[cache_key] = None
-                    missing_prices += 1
-                    continue
-                parsed_price = _as_float(price_info.get("price"), -1.0)
-                if parsed_price < 0:
-                    _STOCK_PRICE_CACHE[cache_key] = None
-                    missing_prices += 1
-                    continue
-                _STOCK_PRICE_CACHE[cache_key] = parsed_price
-                price = parsed_price
+                pending_requests.append((card_id, display_code))
+                pending_quantities[cache_key] = quantity
+                continue
             line_total = price * quantity
+            total_value += line_total
+            card_totals[card_id] = card_totals.get(card_id, 0.0) + line_total
+
+    if pending_requests:
+        results = get_cardmarket_prices(pending_requests, allow_scrape=False)
+        for (card_id, display_code), result in results.items():
+            cache_key = (card_id, display_code)
+            quantity = pending_quantities.get(cache_key, 0)
+            if quantity <= 0:
+                continue
+            if isinstance(result, Exception):
+                _STOCK_PRICE_CACHE[cache_key] = None
+                missing_prices += 1
+                continue
+            parsed_price = _as_float(result.get("price"), -1.0)
+            if parsed_price < 0:
+                _STOCK_PRICE_CACHE[cache_key] = None
+                missing_prices += 1
+                continue
+            _STOCK_PRICE_CACHE[cache_key] = parsed_price
+            line_total = parsed_price * quantity
             total_value += line_total
             card_totals[card_id] = card_totals.get(card_id, 0.0) + line_total
 

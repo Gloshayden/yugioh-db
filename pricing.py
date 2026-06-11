@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -14,6 +16,7 @@ from core import (
 
 CARDMARKET_BASE = "https://www.cardmarket.com/en/YuGiOh/Products/Singles"
 _PRICE_CACHE: dict[tuple[int, str | None, bool], dict[str, object]] = {}
+_PRICE_CACHE_LOCK = Lock()
 
 
 @lru_cache(maxsize=1024)
@@ -129,7 +132,8 @@ def get_cardmarket_price_by_card_id(
 ) -> dict[str, object]:
     cache_set_code = None if set_code is None else set_code.strip().upper()
     cache_key = (int(card_id), cache_set_code, allow_scrape)
-    cached = _PRICE_CACHE.get(cache_key)
+    with _PRICE_CACHE_LOCK:
+        cached = _PRICE_CACHE.get(cache_key)
     if cached is not None:
         return dict(cached)
 
@@ -150,7 +154,8 @@ def get_cardmarket_price_by_card_id(
             "source": "ygoprodeck-set-price",
             "url": "",
         }
-        _PRICE_CACHE[cache_key] = result
+        with _PRICE_CACHE_LOCK:
+            _PRICE_CACHE[cache_key] = result
         return dict(result)
 
     set_slug = _slugify(set_name)
@@ -181,7 +186,8 @@ def get_cardmarket_price_by_card_id(
                     "source": "cardmarket-scrape",
                     "url": product_url,
                 }
-                _PRICE_CACHE[cache_key] = result
+                with _PRICE_CACHE_LOCK:
+                    _PRICE_CACHE[cache_key] = result
                 return dict(result)
         except (HTTPError, URLError):
             pass
@@ -200,7 +206,42 @@ def get_cardmarket_price_by_card_id(
                 "source": "ygoprodeck-cardmarket",
                 "url": product_url,
             }
-            _PRICE_CACHE[cache_key] = result
+            with _PRICE_CACHE_LOCK:
+                _PRICE_CACHE[cache_key] = result
             return dict(result)
 
     raise RuntimeError(f"Unable to get Cardmarket price for card id '{card_id}'.")
+
+
+def get_cardmarket_prices(
+    requests: list[tuple[int, str | None]] | list[int],
+    allow_scrape: bool = True,
+    max_workers: int = 6,
+) -> dict[tuple[int, str | None], dict[str, object] | Exception]:
+    normalized_requests: list[tuple[int, str | None]] = []
+    for item in requests:
+        if isinstance(item, tuple):
+            card_id, set_code = item
+            normalized_requests.append((int(card_id), set_code))
+        else:
+            normalized_requests.append((int(item), None))
+
+    results: dict[tuple[int, str | None], dict[str, object] | Exception] = {}
+    if not normalized_requests:
+        return results
+
+    worker_count = max(1, min(int(max_workers), len(normalized_requests)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(
+                get_cardmarket_price_by_card_id, card_id, set_code, allow_scrape
+            ): (card_id, set_code)
+            for card_id, set_code in normalized_requests
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as exc:
+                results[key] = exc
+    return results
